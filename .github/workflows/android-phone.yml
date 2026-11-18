@@ -1,0 +1,76 @@
+name: Android phone preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, "arena/**"]
+    paths-ignore: ["docs/**", "README.md"]
+
+# Never give untrusted pull-request builds a release token.
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    name: Build installable demo APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      VITE_APP_MODE: demo
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: npm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21" }
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci && npm test && npm run build
+      - run: npx --no-install cap sync android
+      - name: Package debug-signed ARM / x86 compatible preview
+        working-directory: android
+        run: ./gradlew --no-daemon :app:assembleDebug
+      - name: Prepare downloadable files
+        run: |
+          mkdir -p phone
+          cp android/app/build/outputs/apk/debug/app-debug.apk phone/aurum-phone-preview.apk
+          cd phone && sha256sum aurum-phone-preview.apk > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aurum-phone-preview
+          path: phone/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish direct phone download
+    needs: apk
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: aurum-phone-preview, path: phone }
+      - name: Create prerelease and tappable APK link
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          SERVER: ${{ github.server_url }}
+          TAG: phone-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" phone/aurum-phone-preview.apk phone/SHA256SUMS.txt \
+            --repo "$REPO" --target "$SHA" --prerelease \
+            --title "Aurum · Android phone preview #$GITHUB_RUN_NUMBER" \
+            --notes 'Phone test only. Download aurum-phone-preview.apk (not Source code). Sample data resets on reload. No production account or signing secret is included. Each hosted runner uses a disposable debug signing key; uninstall the previous preview if Android rejects an update.'
+          {
+            echo '## Your phone build is ready'
+            echo "**[⬇ Download Android APK]($SERVER/$REPO/releases/download/$TAG/aurum-phone-preview.apk)**"
+            echo ''
+            echo 'फोन पर लिंक टैप करें → डाउनलोड हुई APK खोलें → Android की अनुमति देखकर Install दबाएँ।'
+            echo ''
+            echo 'Demo only. A workflow cannot silently download, install or launch an app on your phone.'
+          } >> "$GITHUB_STEP_SUMMARY"

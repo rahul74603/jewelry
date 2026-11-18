@@ -1,0 +1,20 @@
+name: Verify billing and tenant security
+on: [push, pull_request, workflow_dispatch]
+permissions: { contents: read }
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: npm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21" }
+      - run: npm ci && npm --prefix functions ci
+      - run: npm test && npm run build && npm --prefix functions run build
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test
+      - name: Authenticated Functions, rules and transaction races (emulators only)
+        run: npx --yes firebase-tools@15.36.0 emulators:exec --only auth,firestore,functions --project demo-aurum 'npm --prefix functions run test:emulator'

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Aurum Workspace</string>
+    <string name="title_activity_main">Aurum Workspace</string>
+    <string name="package_name">com.aurum.jewellery</string>
+    <string name="custom_url_scheme">com.aurum.jewellery</string>
+</resources>
