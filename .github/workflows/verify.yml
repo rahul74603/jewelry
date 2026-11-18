@@ -1,18 +1,19 @@
 name: Verify billing and tenant security
 on:
   push:
-    branches: [main, "arena/**"]
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
-concurrency:
-  group: verify-${{ github.event.pull_request.head.sha || github.sha }}
-  cancel-in-progress: true
 permissions: { contents: read }
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  verify:
+  core-and-cloud:
+    name: Billing, license and cross-tenant acceptance
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
         with: { persist-credentials: false }
@@ -21,8 +22,24 @@ jobs:
       - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: "21" }
       - run: npm ci && npm --prefix functions ci
-      - run: npm test && npm run build && npm --prefix functions run build
+      - run: npm test && npm --prefix functions run build
+      - name: Auth, Firestore rules, device races and financial transactions
+        run: |
+          set -o pipefail
+          npx --yes firebase-tools@15.36.0 emulators:exec --only auth,firestore,functions --project demo-aurum 'npm --prefix functions run test:emulator' 2>&1 | tee "$RUNNER_TEMP/acceptance.log" || {
+            grep -E '(not ok|error:|Error:)' "$RUNNER_TEMP/acceptance.log" | tail -10 | while IFS= read -r line; do printf '::error::%s\n' "$line"; done
+            exit 1
+          }
+  web:
+    name: Phone layout and browser billing flows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v5
+        with: { node-version: "22", cache: npm }
+      - run: npm ci && npm run build
       - run: npx playwright install --with-deps chromium
-      - run: npx playwright test
-      - name: Authenticated Functions, rules and transaction races (emulators only)
-        run: npx --yes firebase-tools@15.36.0 emulators:exec --only auth,firestore,functions --project demo-aurum 'npm --prefix functions run test:emulator'
+      - name: Test compiled demo (the same assets packaged in the APK)
+        run: npx playwright test

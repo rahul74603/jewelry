@@ -64,10 +64,32 @@ test("Search a product, adjust stock and add a customer", async ({ page }) => {
     .getByRole("dialog")
     .getByRole("button", { name: "Add customer", exact: true })
     .click();
-  await page
-    .getByPlaceholder("Find a customer by name or phone…")
-    .fill("New Buyer");
+  // Navigation closes the asynchronous form. Do not type into the background
+  // search box while the accessible dialog still owns keyboard focus.
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect(page.getByRole("status")).toContainText("Customer added.");
+  const search = page.getByRole("searchbox", {
+    name: "Find a customer by name or phone…",
+  });
+  await search.fill("New Buyer");
+  await expect(search).toHaveValue("New Buyer");
   await expect(
     page.getByRole("row").filter({ hasText: "New Buyer" }),
   ).toBeVisible();
+});
+test("A finalized bill produces a printable PDF from its snapshot", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.locator(".invoices-table tbody tr").first().click();
+  await expect(page.locator(".receipt-brand h2")).toBeVisible();
+  await page.emulateMedia({ media: "print" });
+  await expect(page.locator(".topbar")).toBeHidden();
+  await expect(page.locator(".receipt")).toBeVisible();
+  const pdf = await page.pdf({
+    preferCSSPageSize: true,
+    printBackground: true,
+  });
+  expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
+  expect(pdf.length).toBeGreaterThan(5000);
 });

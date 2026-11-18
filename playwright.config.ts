@@ -3,6 +3,7 @@ export default defineConfig({
   testDir: "tests/browser",
   fullyParallel: false,
   workers: 1,
+  reporter: process.env.CI ? [["github"], ["list"]] : "list",
   timeout: 30000,
   use: {
     baseURL: "http://127.0.0.1:5174",
@@ -19,7 +20,7 @@ export default defineConfig({
       : {},
   },
   webServer: {
-    command: "npm run dev -- --port 5174 --strictPort",
+    command: "npm run preview -- --port 5174 --strictPort",
     url: "http://127.0.0.1:5174",
     reuseExistingServer: !process.env.CI,
     env: { VITE_APP_MODE: "demo" },

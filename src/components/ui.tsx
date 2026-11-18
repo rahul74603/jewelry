@@ -97,7 +97,7 @@ export function Modal({
         <Dialog.Overlay className="overlay" />
         <Dialog.Content
           className={`modal ${wide ? "wide" : ""} ${className}`}
-          aria-describedby={description ? undefined : undefined}
+          {...(description ? {} : { "aria-describedby": undefined })}
         >
           <header className="modal-head">
             <div>

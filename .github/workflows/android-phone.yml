@@ -4,7 +4,15 @@ on:
   workflow_dispatch:
   push:
     branches: [main, "arena/**"]
-    paths-ignore: ["docs/**", "README.md"]
+    paths:
+      - "src/**"
+      - "public/**"
+      - "functions/src/core/**"
+      - "android/**"
+      - "package*.json"
+      - "index.html"
+      - "*.config.*"
+      - ".github/workflows/android-phone.yml"
 
 # Never give untrusted pull-request builds a release token.
 permissions:
@@ -28,7 +36,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$ANDROID_HOME"
-          if [[ ! -f "$ANDROID_HOME/platforms/android-35/android.jar" ]]; then
+          if [[ ! -f "$ANDROID_HOME/platforms/android-35/android.jar" || ! -x "$ANDROID_HOME/build-tools/35.0.0/apksigner" ]]; then
             "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0'
           fi
       - uses: gradle/actions/setup-gradle@v4
@@ -41,6 +49,7 @@ jobs:
         run: |
           mkdir -p phone
           cp android/app/build/outputs/apk/debug/app-debug.apk phone/aurum-phone-preview.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose phone/aurum-phone-preview.apk
           cd phone && sha256sum aurum-phone-preview.apk > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
