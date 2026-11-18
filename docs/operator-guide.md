@@ -45,6 +45,8 @@ Unit weights have up to three decimals; rupee inputs have two. Decimal arithmeti
 
 Finalization uses the current transaction's product/rate/branding snapshots. Invoice, counter, stock deltas, linked payment, receivable posting, draft removal and audit entry commit together. Retrying the same ID and content returns the original document number. Changed content with the same ID is rejected. Estimates do not post; authorized conversion is marked once. Full reversal retains the document and creates offsetting records. Pending/offline financial writes are not supported. Profit excludes tax and uses recorded unit purchase costs; never label revenue as profit.
 
+Drafts preserve the selected settlement, amount actually received (including ₹0) and payment mode. New sales start at ₹0; selecting **Paid in full** explicitly or entering the exact positive total is required to mark full payment. Reopening never tops up the amount, even if prices change. For an older draft without a settlement field, the stored amount is preserved. If changing a saved payment, save the draft again before finalizing. Confirm the displayed total, received amount, mode and outstanding balance: the server recalculates the bill and checks it against both the confirmation and any saved draft before posting. Deploy the updated client and Functions together; new submissions require explicit payment intent and confirmation. Existing issued invoices are not rewritten.
+
 ## Test / capacity boundary
 
 ```sh

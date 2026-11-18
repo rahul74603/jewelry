@@ -14,8 +14,15 @@ import {
   rateSchema,
   adjustment,
   invoiceSchema,
+  draftSchema,
+  finalizeSchema,
 } from "../core/model";
-import { calculateInvoice, postings } from "../core/billing";
+import {
+  assertDraftPayment,
+  assertReviewedPayment,
+  calculateInvoice,
+  postings,
+} from "../core/billing";
 import { digest } from "./common";
 const amountCap = 2000;
 async function rows<T>(
@@ -129,7 +136,7 @@ export async function shopAction(
     return { ok: true };
   }
   if (action === "draft") {
-    const d = invoiceSchema.parse(raw);
+    const d = draftSchema.parse(raw);
     if ((await tx.get(record("invoices", d.id))).exists)
       throw Error("This invoice has already been finalized.");
     tx.set(record("drafts", d.id), { ...d, updatedAt: date });
@@ -150,21 +157,32 @@ export async function shopAction(
         const previous = old.data() as Invoice;
         if (digest(previous.input) !== digest(input))
           throw Error("Transaction ID already used for a different invoice.");
+        // Preserve read-only retries of legacy invoices without rewriting their snapshots.
+        if (previous.input.settlement !== undefined)
+          assertReviewedPayment(
+            previous,
+            finalizeSchema.parse(raw).confirmation,
+          );
         return { id: key, number: previous.number };
       }
+      const { confirmation } = finalizeSchema.parse(raw);
       const countRef = record(
         "counters",
         input.type === "Estimate" ? "estimates" : "invoices",
       );
-      const [profile, counter, contact, rates, stock] = await Promise.all([
-        tx.get(profileRef),
-        tx.get(countRef),
-        input.customerId ? tx.get(record("customers", input.customerId)) : null,
-        rows<Rate>(tx, t, "metalRates"),
-        Promise.all(
-          input.items.map((i) => tx.get(record("products", i.productId))),
-        ),
-      ]);
+      const [draft, profile, counter, contact, rates, stock] =
+        await Promise.all([
+          tx.get(record("drafts", key)),
+          tx.get(profileRef),
+          tx.get(countRef),
+          input.customerId
+            ? tx.get(record("customers", input.customerId))
+            : null,
+          rows<Rate>(tx, t, "metalRates"),
+          Promise.all(
+            input.items.map((i) => tx.get(record("products", i.productId))),
+          ),
+        ]);
       if (input.sourceEstimate) {
         const est = await tx.get(record("invoices", input.sourceEstimate));
         if (
@@ -191,6 +209,8 @@ export async function shopAction(
         date,
         number,
       );
+      assertReviewedPayment(b, confirmation);
+      assertDraftPayment(input, draft.data() as Draft | undefined);
       if (input.sourceEstimate)
         tx.create(record("conversions", input.sourceEstimate), {
           id: input.sourceEstimate,

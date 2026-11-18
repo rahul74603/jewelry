@@ -11,12 +11,14 @@ import {
   profileSchema,
   customerSchema,
   rateSchema,
-  invoiceSchema,
+  draftSchema,
+  finalizeSchema,
   adjustment,
 } from "../../functions/src/core/model";
 import {
   calculateInvoice,
-  paise,
+  assertReviewedPayment,
+  assertDraftPayment,
   postings,
 } from "../../functions/src/core/billing";
 export function seedDemo(): Workspace {
@@ -201,13 +203,13 @@ export function demoMutation(
       throw Error("Adjustment would create negative stock.");
     p.stock += a.delta;
   } else if (action === "draft") {
-    const i = invoiceSchema.parse(raw);
+    const i = draftSchema.parse(raw);
     if (d.invoices.some((b) => b.id === i.id))
       throw Error("Already finalized.");
     d.drafts = d.drafts.filter((b) => b.id !== i.id);
     d.drafts.push({ ...i, updatedAt: at });
   } else if (action === "invoice") {
-    const i = invoiceSchema.parse(raw);
+    const { confirmation, ...i } = finalizeSchema.parse(raw);
     if (d.invoices.some((b) => b.id === i.id))
       throw Error("This document was already finalized.");
     const source = d.invoices.find((b) => b.id === i.sourceEstimate);
@@ -224,6 +226,11 @@ export function demoMutation(
       i,
       at,
       `${i.type === "Estimate" ? "EST" : d.profile.prefix}-${1001 + d.invoices.length}`,
+    );
+    assertReviewedPayment(b, confirmation);
+    assertDraftPayment(
+      i,
+      d.drafts.find((draft) => draft.id === i.id),
     );
     d.invoices.push(b);
     if (source) source.convertedTo = i.id;

@@ -3,6 +3,7 @@ import {
   invoiceSchema,
   type Invoice,
   type InvoiceInput,
+  type FinalizeInput,
   type BillLine,
   type Workspace,
   type Rate,
@@ -10,6 +11,16 @@ import {
 const D = (n: Decimal.Value) => new Decimal(n);
 export const paise = (r: Decimal.Value) =>
   D(r).times(100).toDecimalPlaces(0, Decimal.ROUND_HALF_UP).toNumber();
+// A legacy draft has no selection: keep its exact recorded amount, including zero.
+export function paymentSelection(
+  input: Pick<InvoiceInput, "settlement" | "paid">,
+  totalPaise: number,
+) {
+  return (
+    input.settlement ??
+    (input.paid > 0 && input.paid === totalPaise / 100 ? "full" : "part")
+  );
+}
 const add = (v: number[]) => v.reduce((a, b) => a + b, 0);
 export const indiaDay = (date: string | number | Date) =>
   new Date(new Date(date).getTime() + 19800000).toISOString().slice(0, 10);
@@ -127,6 +138,13 @@ export function calculateInvoice(
     throw Error("Estimates cannot record a payment.");
   if (paidPaise > totalPaise) throw Error("Payment exceeds the invoice total.");
   if (
+    input.settlement === "full" &&
+    (paidPaise === 0 || paidPaise !== totalPaise)
+  )
+    throw Error(
+      "Full payment must match the invoice total. Review the amount received.",
+    );
+  if (
     checkPayment &&
     !customer &&
     paidPaise < totalPaise &&
@@ -150,6 +168,30 @@ export function calculateInvoice(
     paidPaise,
     balancePaise: totalPaise - paidPaise,
   };
+}
+// The confirmation is a comparison, never the source of posted totals or balance.
+export function assertReviewedPayment(
+  bill: Invoice,
+  confirmation: FinalizeInput["confirmation"],
+) {
+  if (
+    bill.totalPaise !== confirmation.totalPaise ||
+    bill.balancePaise !== confirmation.balancePaise
+  )
+    throw Error(
+      "Invoice total or outstanding balance changed. Review the payment again.",
+    );
+}
+export function assertDraftPayment(input: InvoiceInput, draft?: InvoiceInput) {
+  if (
+    draft &&
+    (draft.paid !== input.paid ||
+      draft.mode !== input.mode ||
+      (draft.settlement !== undefined && draft.settlement !== input.settlement))
+  )
+    throw Error(
+      "Payment differs from the saved draft. Save the intended payment to the draft and reopen it before finalizing.",
+    );
 }
 export function postings(b: Invoice, reverse = false) {
   const factor = reverse ? -1 : 1;

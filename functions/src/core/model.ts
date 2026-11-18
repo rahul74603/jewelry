@@ -141,10 +141,31 @@ export const invoiceSchema = z.object({
   type: z.enum(["Non-GST bill", "GST invoice", "Estimate"]),
   items: z.array(lineSchema).min(1, "Add at least one item").max(40),
   paid: money,
+  // Older stored drafts/invoice snapshots have an amount and mode, but no selection.
+  settlement: z.enum(["part", "full"]).optional(),
   mode: z.enum(["Cash", "UPI", "Card", "Bank", "Other"]),
   sourceEstimate: id.optional(),
 });
 export type InvoiceInput = z.infer<typeof invoiceSchema>;
+// New writes require an explicit intent. Never default a missing or zero payment to full.
+export const draftSchema = invoiceSchema
+  .required({ settlement: true })
+  .refine((i) => i.settlement !== "full" || i.paid > 0, {
+    path: ["paid"],
+    message: "Full payment requires a positive received amount.",
+  })
+  .refine((i) => i.type !== "Estimate" || i.paid === 0, {
+    path: ["paid"],
+    message: "Estimates cannot record a payment.",
+  });
+const nonnegativePaise = z.number().int().nonnegative();
+export const finalizeSchema = draftSchema.safeExtend({
+  confirmation: z.object({
+    totalPaise: nonnegativePaise,
+    balancePaise: nonnegativePaise,
+  }),
+});
+export type FinalizeInput = z.infer<typeof finalizeSchema>;
 export type BillLine = LineInput & {
   name: string;
   sku: string;

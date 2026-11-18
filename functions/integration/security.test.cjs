@@ -76,33 +76,29 @@ async function actor() {
   );
   const { idToken } = await r.json();
   assert.ok(idToken);
-  await db
-    .doc("tenants/" + tid)
-    .set({
-      ownerUid: uid,
-      status: "Active",
-      licenseId: lid,
-      id: tid,
-      shopName: tid,
-      email,
-    });
+  await db.doc("tenants/" + tid).set({
+    ownerUid: uid,
+    status: "Active",
+    licenseId: lid,
+    id: tid,
+    shopName: tid,
+    email,
+  });
   await db
     .doc(`tenants/${tid}/settings/profile`)
     .set({ ...makeProfile(tid, "Test owner", email), setupComplete: true });
-  await db
-    .doc("licenses/" + lid)
-    .set({
-      id: lid,
-      ownerUid: uid,
-      tenantId: tid,
-      plan: "Basic",
-      status: "Pending",
-      expiresAt: Date.now() + 86400000,
-      deviceLimit: 1,
-      activeCount: 0,
-      createdAt: Date.now(),
-    });
-  return { uid, tid, lid, idToken };
+  await db.doc("licenses/" + lid).set({
+    id: lid,
+    ownerUid: uid,
+    tenantId: tid,
+    plan: "Basic",
+    status: "Pending",
+    expiresAt: Date.now() + 86400000,
+    deviceLimit: 1,
+    activeCount: 0,
+    createdAt: Date.now(),
+  });
+  return { uid, tid, lid, idToken, email, password };
 }
 function keys() {
   const { privateKey, publicKey } = crypto.generateKeyPairSync("ec", {
@@ -280,6 +276,8 @@ test("Invoice posting is idempotent, atomic, tenant-scoped and reversible", asyn
   });
   const bill = {
     id: "order1",
+    settlement: "part",
+    confirmation: { totalPaise: 13500, balancePaise: 3500 },
     customerId: "c",
     type: "Non-GST bill",
     paid: 100,
@@ -346,5 +344,209 @@ test("Invoice posting is idempotent, atomic, tenant-scoped and reversible", asyn
   assert.equal(
     (await t.collection("invoices").doc("order1").get()).get("totalPaise"),
     13500,
+  );
+});
+
+// A ₹5,000 bill in an isolated emulator tenant; all draft and invoice operations
+// go through the same authenticated/signed callables as the licensed client.
+async function seedPaymentDesk(a) {
+  const t = db.doc(`tenants/${a.tid}`);
+  const batch = db.batch();
+  batch.create(t.collection("products").doc("ring"), {
+    id: "ring",
+    sku: "R",
+    name: "Payment test ring",
+    category: "Ring",
+    metal: "Gold",
+    purity: "22K",
+    gross: 1,
+    stone: 0,
+    deduction: 0,
+    cost: 4000,
+    stock: 8,
+    makingMode: "Fixed",
+    making: 0,
+    hsn: "",
+    huid: "",
+  });
+  batch.create(t.collection("metalRates").doc("rate"), {
+    id: "rate",
+    metal: "Gold",
+    purity: "22K",
+    rate: 5000,
+    effectiveAt: "2025-01-01T00:00:00.000Z",
+  });
+  batch.create(t.collection("customers").doc("buyer"), {
+    id: "buyer",
+    name: "Credit buyer",
+    email: "",
+    phone: "",
+    address: "",
+    gstin: "",
+  });
+  await batch.commit();
+  return t;
+}
+async function paymentDesk() {
+  const a = await actor(),
+    k = keys();
+  await activate(a, k, await issue(a));
+  return {
+    t: await seedPaymentDesk(a),
+    send: (action, data) => act(a, k, action, data),
+  };
+}
+const paymentDraft = (paid) => ({
+  id: "billing-test",
+  customerId: "buyer",
+  type: "Non-GST bill",
+  mode: "Bank",
+  settlement: paid === 5000 ? "full" : "part",
+  paid,
+  items: [
+    {
+      productId: "ring",
+      quantity: 1,
+      makingMode: "Fixed",
+      making: 0,
+      wastagePct: 0,
+      stoneValue: 0,
+      otherCharges: 0,
+      discount: 0,
+    },
+  ],
+});
+const confirmPayment = (draft) => ({
+  ...draft,
+  confirmation: { totalPaise: 500000, balancePaise: 500000 - draft.paid * 100 },
+});
+for (const paid of [0, 2000, 5000]) {
+  test(`Live callable: ₹${paid} received survives draft round trips on a ₹5,000 bill`, async () => {
+    const { t, send } = await paymentDesk(),
+      draft = paymentDraft(paid);
+    let saved = draft;
+    for (let i = 0; i < 3; i++) {
+      await send("draft", saved);
+      [saved] = (await send("workspace")).workspace.drafts;
+      assert.equal(saved.paid, paid);
+      assert.equal(saved.mode, "Bank");
+      assert.equal(saved.settlement, draft.settlement);
+    }
+    assert.equal((await t.collection("payments").get()).size, 0);
+    await send("invoice", confirmPayment(saved));
+    const { workspace } = await send("workspace");
+    assert.equal(workspace.drafts.length, 0);
+    assert.equal(workspace.invoices.length, 1);
+    const [bill] = workspace.invoices;
+    assert.deepEqual(
+      [bill.totalPaise, bill.paidPaise, bill.balancePaise, bill.mode],
+      [500000, paid * 100, (5000 - paid) * 100, "Bank"],
+    );
+    const payments = await t.collection("payments").get();
+    assert.deepEqual(
+      payments.docs.map((d) => d.get("amountPaise")),
+      paid ? [paid * 100] : [],
+    );
+    const ledger = await t.collection("customerLedger").get();
+    assert.deepEqual(
+      ledger.docs.map((d) => d.get("deltaPaise")),
+      [(5000 - paid) * 100],
+    );
+  });
+}
+test("Live callable rejects inconsistent, missing, or changed payment before any posting", async () => {
+  const { t, send } = await paymentDesk(),
+    draft = paymentDraft(0),
+    bill = confirmPayment(draft);
+  await send("draft", draft);
+  const invalid = [
+    [{ ...bill, paid: -1 }, /paid/],
+    [{ ...bill, paid: 0.001 }, /paid/],
+    [{ ...bill, paid: 5000.01 }, /exceeds/],
+    [{ ...bill, settlement: "full" }, /Full payment/],
+    [{ ...bill, paid: 2000 }, /balance changed/],
+    [
+      { ...bill, confirmation: { totalPaise: 500001, balancePaise: 500000 } },
+      /total or outstanding/,
+    ],
+    [
+      { ...bill, confirmation: { totalPaise: 500000, balancePaise: 0 } },
+      /balance changed/,
+    ],
+    [draft, /confirmation/],
+    // Even a mathematically consistent ₹0 -> fully paid rewrite (or a mode swap)
+    // cannot override the independently stored draft during finalization.
+    [confirmPayment(paymentDraft(5000)), /differs from the saved draft/],
+    [{ ...bill, mode: "Cash" }, /differs from the saved draft/],
+  ];
+  for (const [request, message] of invalid)
+    await assert.rejects(send("invoice", request), message);
+  for (const name of [
+    "invoices",
+    "payments",
+    "customerLedger",
+    "stockMovements",
+    "counters",
+  ])
+    assert.equal((await t.collection(name).get()).size, 0, name);
+  assert.equal(
+    (await t.collection("drafts").doc(draft.id).get()).get("paid"),
+    0,
+  );
+});
+test("Live callable: concurrent submissions of the same ₹2,000 payment create exactly one payment entry", async () => {
+  const { t, send } = await paymentDesk(),
+    draft = paymentDraft(2000),
+    bill = confirmPayment(draft);
+  await send("draft", draft);
+  const a = await Promise.all([send("invoice", bill), send("invoice", bill)]);
+  assert.deepEqual(a[0], a[1]);
+  await assert.rejects(
+    send("invoice", confirmPayment({ ...draft, paid: 1000 })),
+    /already used/,
+  );
+  const payments = await t.collection("payments").get();
+  assert.deepEqual(
+    payments.docs.map((d) => [
+      d.get("invoiceId"),
+      d.get("amountPaise"),
+      d.get("mode"),
+    ]),
+    [[draft.id, 200000, "Bank"]],
+  );
+  assert.equal((await t.collection("invoices").get()).size, 1);
+  assert.deepEqual(
+    (await t.collection("customerLedger").get()).docs.map((d) =>
+      d.get("deltaPaise"),
+    ),
+    [300000],
+  );
+});
+
+test("Live browser: an existing zero-received draft stays credit through save, reopen and posting", async () => {
+  const a = await actor(),
+    t = await seedPaymentDesk(a);
+  const { settlement: _, ...legacy } = paymentDraft(0);
+  await t
+    .collection("drafts")
+    .doc(legacy.id)
+    .create({ ...legacy, updatedAt: new Date().toISOString() });
+  await require("./live-payment-browser.cjs")(a, await issue(a));
+  const posted = (await t.collection("invoices").doc(legacy.id).get()).data();
+  assert.deepEqual(
+    [
+      posted.input.settlement,
+      posted.mode,
+      posted.paidPaise,
+      posted.balancePaise,
+    ],
+    ["part", "Bank", 0, 500000],
+  );
+  assert.equal((await t.collection("payments").get()).size, 0);
+  assert.deepEqual(
+    (await t.collection("customerLedger").get()).docs.map((d) =>
+      d.get("deltaPaise"),
+    ),
+    [500000],
   );
 });

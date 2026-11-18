@@ -25,14 +25,19 @@ import {
   FilePenLine,
   IndianRupee,
 } from "lucide-react";
-import type {
-  Invoice,
-  InvoiceInput,
-  LineInput,
-  Product,
+import {
+  draftSchema,
+  type FinalizeInput,
+  type Invoice,
+  type InvoiceInput,
+  type LineInput,
+  type Product,
 } from "../../functions/src/core/model";
 import {
   calculateInvoice,
+  assertDraftPayment,
+  paise,
+  paymentSelection,
   paymentStatus,
   currentRates,
 } from "../../functions/src/core/billing";
@@ -168,28 +173,28 @@ export function InvoiceEditor() {
         (b) => b.id === (params.get("duplicate") || params.get("convert")),
       );
     if (d) return { ...d };
-    if (copy)
+    if (copy) {
+      const { sourceEstimate: _, ...original } = copy.input;
       return {
-        ...copy.input,
+        ...original,
         id: key(),
         type: params.has("convert") ? "Non-GST bill" : copy.type,
         paid: 0,
-        ...(params.has("convert")
-          ? { sourceEstimate: copy.id }
-          : { sourceEstimate: undefined }),
+        settlement: "part",
+        ...(params.has("convert") ? { sourceEstimate: copy.id } : {}),
       };
+    }
     return {
       id: key(),
       customerId: "",
       type: params.has("estimate") ? "Estimate" : "Non-GST bill",
       items: [],
       paid: 0,
+      settlement: "part",
       mode: "Cash",
     };
   });
-  const [settlement, S] = useState<"full" | "part">(
-      invoice.paid ? "part" : "full",
-    ),
+  const [review, setReview] = useState<FinalizeInput | null>(null),
     [error, E] = useState(""),
     [busy, B] = useState(false),
     [modal, M] = useState(""),
@@ -210,7 +215,7 @@ export function InvoiceEditor() {
       return {
         b: calculateInvoice(
           data,
-          { ...invoice, paid: 0 },
+          { ...invoice, paid: 0, settlement: "part" },
           new Date().toISOString(),
           "Preview",
           false,
@@ -223,12 +228,44 @@ export function InvoiceEditor() {
     }
   }, [data, invoice]);
   const total = preview.b?.totalPaise ?? 0,
-    paid =
-      invoice.type === "Estimate"
-        ? 0
-        : settlement === "full"
-          ? total / 100
-          : invoice.paid;
+    settlement = paymentSelection(invoice, total);
+  const setPayment = (
+    paid: number,
+    settlement: FinalizeInput["settlement"],
+  ) => {
+    E("");
+    I((s) => ({ ...s, paid, settlement }));
+  };
+  const paymentInput = () =>
+    draftSchema.parse({
+      ...invoice,
+      settlement,
+      ...(invoice.type === "Estimate" ? { paid: 0, settlement: "part" } : {}),
+    });
+  const reviewPayment = () => {
+    E("");
+    try {
+      const input = paymentInput();
+      const b = calculateInvoice(
+        data,
+        input,
+        new Date().toISOString(),
+        "Preview",
+      );
+      const confirmation = {
+        totalPaise: b.totalPaise,
+        balancePaise: b.balancePaise,
+      };
+      assertDraftPayment(
+        input,
+        data.drafts.find((d) => d.id === input.id),
+      );
+      // Submit exactly what the owner sees here, even if a background refresh occurs.
+      setReview({ ...input, confirmation });
+    } catch (e) {
+      E(err(e));
+    }
+  };
   const add = (p: Product) => {
     const i = invoice.items.findIndex((x) => x.productId === p.id);
     if (i >= 0) setLine(i, { quantity: invoice.items[i].quantity + 1 });
@@ -254,9 +291,8 @@ export function InvoiceEditor() {
     B(true);
     E("");
     try {
-      const payload = JSON.parse(JSON.stringify({ ...invoice, paid }));
-      if (!draft)
-        calculateInvoice(data, payload, new Date().toISOString(), "Preview");
+      const payload = draft ? paymentInput() : review;
+      if (!payload) throw Error("Review the payment before finalizing.");
       await perform(draft ? "draft" : "invoice", payload);
       notify(
         draft
@@ -268,7 +304,7 @@ export function InvoiceEditor() {
       nav(draft ? "/billing" : "/billing/" + invoice.id);
     } catch (e) {
       E(err(e));
-      M("");
+      setReview(null);
     } finally {
       B(false);
     }
@@ -501,23 +537,30 @@ export function InvoiceEditor() {
               <Field label="Payment">
                 <Select
                   value={settlement}
-                  onChange={(e) => S(e.target.value as "full" | "part")}
+                  onChange={(e) =>
+                    e.target.value === "full"
+                      ? setPayment(total / 100, "full")
+                      : setPayment(invoice.paid, "part")
+                  }
                 >
-                  <option value="full">Paid in full</option>
+                  <option value="full" disabled={!preview.b || total === 0}>
+                    Paid in full
+                  </option>
                   <option value="part">Partial payment / credit</option>
                 </Select>
               </Field>
-              {settlement === "part" && (
-                <Field label="Amount received (₹)">
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={invoice.paid}
-                    onChange={(e) => change("paid", +e.target.value)}
-                  />
-                </Field>
-              )}
+              <Field label="Amount received (₹)">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={invoice.paid}
+                  onChange={(e) => {
+                    const paid = Number(e.target.value);
+                    setPayment(paid, paymentSelection({ paid }, total));
+                  }}
+                />
+              </Field>
               <Field label="Payment mode">
                 <Select
                   value={invoice.mode}
@@ -532,7 +575,7 @@ export function InvoiceEditor() {
               </Field>
               <div className="row-between">
                 <small>Balance due</small>
-                <strong>{rupee(total - Math.round(paid * 100), 2)}</strong>
+                <strong>{rupee(total - paise(invoice.paid), 2)}</strong>
               </div>
             </div>
           )}
@@ -540,7 +583,7 @@ export function InvoiceEditor() {
           <button
             disabled={busy || !preview.b}
             className="btn primary full-btn"
-            onClick={() => M("confirm")}
+            onClick={reviewPayment}
           >
             <Check size={16} />
             {invoice.type === "Estimate" ? "Save estimate" : "Finalize invoice"}
@@ -606,22 +649,32 @@ export function InvoiceEditor() {
         </div>
       </Modal>
       <Modal
-        open={modal === "confirm"}
-        onClose={() => M("")}
+        open={review !== null}
+        onClose={() => setReview(null)}
         title={
           invoice.type === "Estimate"
             ? "Save this estimate?"
             : "Finalize this invoice?"
         }
       >
-        <div className="confirm-total">{rupee(total, 2)}</div>
-        <p className="muted">
-          {invoice.type === "Estimate"
-            ? "Estimates do not move stock or record payments."
-            : `This posts ${invoice.items.length} line item(s), records ${cash(paid, 2)} received and preserves the applied rates. Changes require a reversal.`}
-        </p>
+        {review && (
+          <>
+            <div className="confirm-total">
+              {rupee(review.confirmation.totalPaise, 2)}
+            </div>
+            <p className="muted">
+              {review.type === "Estimate"
+                ? "Estimates do not move stock or record payments."
+                : `Received · ${review.mode}: ${cash(review.paid, 2)}. Outstanding: ${rupee(review.confirmation.balancePaise, 2)}. Changes require a reversal.`}
+            </p>
+          </>
+        )}
         <div className="modal-actions">
-          <button className="btn outline" disabled={busy} onClick={() => M("")}>
+          <button
+            className="btn outline"
+            disabled={busy}
+            onClick={() => setReview(null)}
+          >
             Review bill
           </button>
           <button

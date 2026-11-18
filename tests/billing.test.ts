@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   calculateInvoice,
+  paymentSelection,
+  assertReviewedPayment,
   postings,
   paise,
   currentRates,
@@ -226,5 +228,34 @@ describe("Precise shared billing", () => {
     expect(
       invoiceSchema.safeParse({ ...input(), id: "wrong/path" }).success,
     ).toBe(false);
+  });
+});
+
+describe("Draft payment intent", () => {
+  it("reads legacy amounts without replacing zero, including when the quote is zero", () => {
+    expect(paymentSelection({ paid: 0 }, 0)).toBe("part");
+    expect(paymentSelection({ paid: 0 }, 500000)).toBe("part");
+    expect(paymentSelection({ paid: 2000 }, 500000)).toBe("part");
+    expect(paymentSelection({ paid: 5000 }, 500000)).toBe("full");
+    expect(paymentSelection({ paid: 5000, settlement: "part" }, 500000)).toBe(
+      "part",
+    );
+  });
+  it("does not top up a full payment when the quote changes; re-review is required", () => {
+    const d = data(),
+      i = input();
+    i.paid = 24960;
+    i.settlement = "full";
+    const reviewed = calculateInvoice(d, i, date, "Preview");
+    d.rates[0].rate += 10;
+    expect(() => calculateInvoice(d, i, date, "New price")).toThrow(
+      "Full payment must match",
+    );
+    i.settlement = "part";
+    const repriced = calculateInvoice(d, i, date, "New price");
+    expect(repriced.paidPaise).toBe(reviewed.paidPaise);
+    expect(() => assertReviewedPayment(repriced, reviewed)).toThrow(
+      "balance changed",
+    );
   });
 });
