@@ -40,6 +40,13 @@ jobs:
       - uses: actions/setup-node@v5
         with: { node-version: "22", cache: npm }
       - run: npm ci && npm run build
-      - run: npx playwright install --with-deps chromium
-      - name: Test compiled demo (the same assets packaged in the APK)
-        run: npx playwright test
+      - name: Test compiled demo in the runner's installed Chrome
+        run: |
+          set -euo pipefail
+          if browser="$(command -v google-chrome || command -v chromium)"; then
+            export PLAYWRIGHT_CHROMIUM_EXECUTABLE="$browser"
+            "$browser" --version
+          else
+            npx playwright install chromium
+          fi
+          npx playwright test

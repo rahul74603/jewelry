@@ -1,5 +1,9 @@
 # Delivery report — foundation and phone preview
 
+**[Download the verified Android phone preview](https://github.com/rahul74603/jewelry/releases/download/phone-44378611208-1/aurum-phone-preview.apk)** — 4,864,778 bytes, debug-signed, disposable sample workspace. [Build and publish record](https://github.com/rahul74603/jewelry/actions/runs/44378611208). SHA-256: `a394dd667e1a2590f89bf5cb79f78f97c96e3393765e2895ad31ac8054f2ed96`.
+
+At app revision `48a6fe8`: 20 financial/license unit tests passed. Four browser scenarios (including PDF output) passed three consecutive runs against the production demo bundle. [Authenticated Firebase Emulator Suite checks passed](https://github.com/rahul74603/jewelry/actions/runs/44378622319/job/135064421333), including two-shop isolation, concurrent activation, renewal, device transfer, duplicate invoice submission and reversal. Android debug unit tests, APK assembly and signature verification passed on the hosted runner. This does not replace testing the APK on the customer's phone or printer.
+
 This is a staged pilot. An implemented code path, an emulator test, a deployed service and a physical-device signoff are **different milestones**. No live Firebase deployment or production customer account is provisioned by this checkout.
 
 | Phase                    | Delivered in this pass                                                                                                                                                                                                                                                                                  | Remaining release gates                                                                                                                                                                    |

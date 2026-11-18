@@ -2,6 +2,10 @@
 
 A multi-shop jewellery workspace and a separate company licensing console. **This is a foundation/pilot, not a production-certified ERP.** The phone preview runs without credentials; real shop data requires the licensed build and a configured Firebase project.
 
+**[Android demo APK डाउनलोड करें (4.9 MB)](https://github.com/rahul74603/jewelry/releases/download/phone-44378611208-1/aurum-phone-preview.apk)** · [सफल build](https://github.com/rahul74603/jewelry/actions/runs/44378611208) · [Checksum](https://github.com/rahul74603/jewelry/releases/download/phone-44378611208-1/SHA256SUMS.txt)
+
+यह लिंक commit `48a6fe8` के जाँचे गए phone preview का है। आगे बनने वाली हर APK का अपना लिंक उसी workflow run के Summary में मिलेगा।
+
 ## फ़ोन पर ऐप कैसे जाँचें
 
 1. GitHub में **Actions → Android phone preview → Run workflow** खोलें। पहली बार workflow को default branch (`main`) में merge करना ज़रूरी है ताकि **Run workflow** बटन दिखाई दे। इस working branch पर पहला push भी preview build शुरू करता है।
