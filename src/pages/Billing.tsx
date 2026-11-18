@@ -38,7 +38,7 @@ import {
 } from "../../functions/src/core/billing";
 import { useShop, useToast } from "../lib/store";
 import { rupee, day, key, err, cash } from "../lib/format";
-import { printDocument } from "../lib/device";
+import { printDocument, shareSummary } from "../lib/device";
 import {
   PageHead,
   Records,
@@ -657,11 +657,8 @@ export function InvoiceDetail() {
   const share = async () => {
     const text = `${demo ? "SAMPLE · " : ""}${b.shop.shopName} · ${b.number}\n${day(b.issuedAt)}\nTotal ${rupee(b.totalPaise, 2)} · Balance ${rupee(b.balancePaise, 2)}`;
     try {
-      if (navigator.share) await navigator.share({ title: b.number, text });
-      else {
-        await navigator.clipboard.writeText(text);
+      if ((await shareSummary(b.number, text)) === "copied")
         notify("Invoice summary copied for sharing.");
-      }
     } catch (e) {
       if ((e as Error).name !== "AbortError") E(err(e));
     }

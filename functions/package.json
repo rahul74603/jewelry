@@ -12,14 +12,21 @@
   },
   "dependencies": {
     "decimal.js": "^10.5.0",
-    "firebase-admin": "^13.5.0",
+    "firebase-admin": "^14.5.1",
     "firebase-functions": "^7.0.0",
-    "zod": "^3.25.0"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "typescript": "~5.9.0",
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@types/node": "^22.15.0",
-    "@firebase/rules-unit-testing": "^5.0.0",
-    "firebase": "^12.0.0"
+    "firebase": "^12.19.0",
+    "typescript": "~5.9.0"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "1.14.7",
+    "@firebase/app": "0.16.2",
+    "@firebase/app-compat": "0.5.18",
+    "@firebase/database": "1.1.5",
+    "@firebase/database-compat": "2.1.7"
   }
 }

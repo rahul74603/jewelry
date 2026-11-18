@@ -7,6 +7,7 @@ const vault = registerPlugin<{
     message: string;
   }) => Promise<{ signature: string }>;
   printInvoice: () => Promise<void>;
+  shareText: (v: { text: string }) => Promise<void>;
 }>("DeviceVault");
 const b64 = (b: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Array(b)));
 export const hash = async (b: BufferSource) =>
@@ -76,4 +77,17 @@ export async function deviceIdentity(uid: string) {
 export async function printDocument() {
   if (native) await vault.printInvoice();
   else window.print();
+}
+
+export async function shareSummary(title: string, text: string) {
+  if (native) {
+    await vault.shareText({ text });
+    return "shared";
+  }
+  if (navigator.share) {
+    await navigator.share({ title, text });
+    return "shared";
+  }
+  await navigator.clipboard.writeText(text);
+  return "copied";
 }

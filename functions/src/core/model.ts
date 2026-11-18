@@ -23,7 +23,7 @@ const gstin = z
   );
 export const taxRule = z.object({
   hsn: z.string().regex(/^\d{4,8}$/),
-  effective: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  effective: z.string().date("Enter a valid effective date"),
   percent: z.number().min(0).max(100).multipleOf(0.01),
 });
 export const profileSchema = z
@@ -54,7 +54,13 @@ export const profileSchema = z
   .refine((p) => !p.gstRegistered || p.gstin.length === 15, {
     message: "A registered shop needs a GSTIN",
     path: ["gstin"],
-  });
+  })
+  .refine(
+    (p) =>
+      new Set(p.taxes.map((r) => r.hsn + ":" + r.effective)).size ===
+      p.taxes.length,
+    { message: "Duplicate effective date for the same HSN", path: ["taxes"] },
+  );
 export type Profile = z.infer<typeof profileSchema>;
 export const makeProfile = (
   shopName: string,
