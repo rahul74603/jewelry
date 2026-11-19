@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jewelry — Collections | Rings, Necklaces, Earrings, Bangles</title>
+<meta name="description" content="Jewelry showcase — rings, necklaces, earrings and bangles. Check weight, purity and making charges, calculate an estimate, and enquire on WhatsApp. Shop details are placeholders until real details are added.">
+<meta property="og:title" content="Jewelry — Collections">
+<meta property="og:description" content="Rings, necklaces, earrings and bangles — with weight, purity, making charges and a price calculator.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💍</text></svg>">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"JewelryStore","name":"Jewelry [SHOP NAME — placeholder]","description":"Jewellery shop showcase. Address, phone and hours are placeholders.","address":{"@type":"PostalAddress","streetAddress":"[SHOP ADDRESS — placeholder]"},"telephone":"[PHONE — placeholder]"}
+</script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Georgia,'Times New Roman',serif;background:#fdf8f2;color:#2b2118;line-height:1.6}
+  a{color:#7a5a2e}
+  button{font:inherit;cursor:pointer}
+  button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #7a5a2e;outline-offset:2px}
+  header{text-align:center;padding:48px 20px 32px;background:linear-gradient(135deg,#3d2b1f,#7a5a2e);color:#f7ead1}
+  header h1{font-size:2.4rem;letter-spacing:2px}
+  header p{margin-top:10px;opacity:.92}
+  .topbar{position:sticky;top:0;z-index:10;background:#fff;border-bottom:1px solid #e8dcc8;padding:10px 16px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center}
+  .topbar nav{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+  .chip{border:1px solid #c9a227;background:#fff;color:#5c451a;padding:7px 12px;border-radius:20px}
+  .chip[aria-pressed="true"]{background:#2b2118;color:#fff;border-color:#2b2118}
+  .tools{max-width:1080px;margin:0 auto;padding:28px 20px 0;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  .tools input,.tools select{padding:10px 12px;border:1px solid #d8c9a8;border-radius:8px;background:#fff;font:inherit}
+  .tools input{flex:1;min-width:200px}
+  .count{color:#7a6a58}
+  main{max-width:1080px;margin:0 auto;padding:20px}
+  section{padding:28px 0}
+  h2{text-align:center;margin-bottom:8px}
+  .sub{text-align:center;color:#7a6a58;margin-bottom:24px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px}
+  .card{background:#fff;border:1px solid #e8dcc8;border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+  .tile{height:170px;display:flex;align-items:center;justify-content:center;font-size:3rem;background:linear-gradient(135deg,#f6d365,#b8860b)}
+  .tile.silver{background:linear-gradient(135deg,#e8e8e8,#9aa0a6)}
+  .tile.rose{background:linear-gradient(135deg,#f7c6c6,#b76e79)}
+  .card-body{padding:18px;display:flex;flex-direction:column;gap:6px;flex:1}
+  .tag{align-self:flex-start;font-size:.75rem;background:#fdf0d5;color:#7a5a2e;padding:3px 9px;border-radius:20px}
+  .price{color:#7a5a2e;font-weight:bold;font-size:1.15rem}
+  .specs{font-size:.9rem;color:#5c5145}
+  .stock{font-size:.85rem;font-weight:bold}
+  .stock.in{color:#2e7d32}.stock.out{color:#b3261e}
+  .card-actions{margin-top:auto;display:flex;gap:8px;flex-wrap:wrap}
+  .btn{display:inline-block;padding:10px 16px;background:#2b2118;color:#fff;text-decoration:none;border:none;border-radius:8px}
+  .btn.secondary{background:#fff;color:#2b2118;border:1px solid #2b2118}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .panel{background:#fff;border:1px solid #e8dcc8;border-radius:12px;padding:20px}
+  .panel h3{margin-bottom:10px}
+  .calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:12px 0}
+  .calc label{display:block;font-size:.9rem;color:#5c5145}
+  .calc input,.calc select{width:100%;padding:10px;border:1px solid #d8c9a8;border-radius:8px;font:inherit;margin-top:4px}
+  .result{font-weight:bold;font-size:1.2rem;background:#fdf0d5;padding:12px;border-radius:8px}
+  .muted{color:#7a6a58;font-size:.9rem}
+  .note{max-width:720px;margin:0 auto 28px;padding:16px 20px;background:#fff8e1;border:1px dashed #c9a227;border-radius:10px;text-align:center}
+  .two-col{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+  .faq details{background:#fff;border:1px solid #e8dcc8;border-radius:10px;padding:14px 16px;margin-bottom:10px}
+  .faq summary{cursor:pointer;font-weight:bold}
+  footer{text-align:center;padding:28px 20px 40px;color:#7a6a58}
+  .placeholder{color:#b3261e;font-weight:bold}
+  @media (max-width:600px){header h1{font-size:1.8rem}.topbar{justify-content:flex-start}}
+</style>
+</head>
+<body>
+<header>
+  <h1>JEWELRY</h1>
+  <p>Timeless pieces, made to be worn every day.</p>
+  <p class="muted" style="color:#f7ead1">Shop name, address, phone &amp; hours — <span class="placeholder">placeholder hain, asli details abhi nahi mili hain.</span></p>
+</header>
+
+<div class="topbar" role="navigation" aria-label="Categories">
+  <nav id="filters" aria-label="Filter by category">
+    <button class="chip" data-cat="all" aria-pressed="true">All</button>
+    <button class="chip" data-cat="Rings" aria-pressed="false">Rings</button>
+    <button class="chip" data-cat="Necklaces" aria-pressed="false">Necklaces</button>
+    <button class="chip" data-cat="Earrings" aria-pressed="false">Earrings</button>
+    <button class="chip" data-cat="Bangles" aria-pressed="false">Bangles</button>
+    <button class="chip" data-cat="Bracelets" aria-pressed="false">Bracelets</button>
+  </nav>
+  <button class="btn secondary" id="enquiryBtn" type="button">Enquiry list (<span id="enquiryCount">0</span>)</button>
+</div>
+
+<div class="tools">
+  <label style="position:absolute;left:-9999px" for="search">Search products</label>
+  <input id="search" type="search" placeholder="Search — ring, pearl, SKU…" autocomplete="off">
+  <label style="position:absolute;left:-9999px" for="sort">Sort products</label>
+  <select id="sort">
+    <option value="featured">Sort: Featured</option>
+    <option value="low">Price: Low to High</option>
+    <option value="high">Price: High to Low</option>
+    <option value="name">Name: A to Z</option>
+  </select>
+  <span class="count" id="resultCount" aria-live="polite"></span>
+</div>
+
+<main>
+  <section aria-labelledby="collections-h">
+    <h2 id="collections-h">Featured Collections</h2>
+    <p class="sub">Prices, weight &amp; purity below are <strong>placeholders / sample</strong> — real products milte hi replace kar denge.</p>
+    <div class="grid" id="grid"></div>
+    <p id="noResults" class="sub" hidden>No product matches your search / filter. Try “All” or a different word.</p>
+  </section>
+
+  <section aria-labelledby="calc-h">
+    <h2 id="calc-h">Gold Price Calculator — Estimate</h2>
+    <p class="sub">Aaj ka rate yahan daalo. Ye sirf estimate hai, final bill shop rate par banega.</p>
+    <div class="panel">
+      <div class="calc">
+        <div><label for="metal">Metal / Purity</label><select id="metal"><option value="22">Gold 22K</option><option value="18">Gold 18K</option><option value="silver">Silver 925</option></select></div>
+        <div><label for="weight">Weight (grams)</label><input id="weight" type="number" min="0" step="0.01" value="5" inputmode="decimal"></div>
+        <div><label for="rate">Rate per gram (₹) — sample rate</label><input id="rate" type="number" min="0" step="1" value="7850" inputmode="numeric"></div>
+        <div><label for="making">Making charges (%)</label><input id="making" type="number" min="0" step="0.5" value="12" inputmode="decimal"></div>
+      </div>
+      <p class="result" id="calcResult" aria-live="polite"></p>
+      <p class="muted">Formula: (weight × rate) + making % + 3% GST. Stone / diamond charges alag se judte hain. Rate roz badalta hai — isliye calculator me rate editable rakha hai.</p>
+    </div>
+  </section>
+
+  <section aria-labelledby="trust-h">
+    <h2 id="trust-h">Why buy from us? — Trust</h2>
+    <div class="two-col">
+      <div class="panel"><h3>BIS Hallmark &amp; HUID</h3><p>Har gold piece par BIS Hallmark aur HUID hona chahiye. <span class="muted">Note: is website par HUID verify nahi hota — asli HUID bill aur BIS Care app se check karna chahiye.</span></p></div>
+      <div class="panel"><h3>Purity clearly likhi hai</h3><p>Har product par 22K / 18K, weight aur making charges saaf likhe hone chahiye — bina iske price compare karna mushkil hota hai.</p></div>
+      <div class="panel"><h3>Exchange &amp; Return</h3><p><span class="placeholder">Policy abhi confirm nahi hui hai.</span> Shop ko ye batana hoga: exchange kitne din me, making charges refund honge ya nahi, aur old gold exchange ka rate kya hoga.</p></div>
+      <div class="panel"><h3>Bill &amp; GST</h3><p>Har purchase par GST bill, weight, purity aur HUID likha hona chahiye. Yehi bill baad me exchange / resale me kaam aata hai.</p></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="enquiry-h">
+    <h2 id="enquiry-h">Your Enquiry List</h2>
+    <p class="sub">Product ke “Add to enquiry” par tap karo — phir ek saath WhatsApp par bhej sakte ho.</p>
+    <div class="panel" id="enquiryPanel">
+      <p id="enquiryEmpty">Abhi list khaali hai. Upar se koi product add karo.</p>
+      <ul id="enquiryList"></ul>
+      <p id="enquiryTotal" class="result" hidden></p>
+      <div class="card-actions" style="margin-top:12px">
+        <button class="btn" id="whatsappBtn" type="button" disabled>Send on WhatsApp — number abhi nahi hai</button>
+        <button class="btn secondary" id="copyBtn" type="button" disabled>Copy enquiry message</button>
+        <button class="btn secondary" id="clearBtn" type="button" disabled>Clear list</button>
+      </div>
+      <p class="muted" id="copyMsg" aria-live="polite"></p>
+    </div>
+  </section>
+
+  <section class="faq" aria-labelledby="faq-h">
+    <h2 id="faq-h">FAQs</h2>
+    <details><summary>Price kaise banta hai?</summary><p>Gold rate (per gram) × weight + making charges + GST. Rate roz badalta hai, isliye aaj ka rate calculator me daal kar estimate nikalo.</p></details>
+    <details><summary>22K aur 18K me kya farak hai?</summary><p>22K me zyada gold hota hai (916 purity), 18K thoda halka aur zyada mazboot hota hai — daily wear aur stone wale designs me zyada use hota hai.</p></details>
+    <details><summary>Old gold exchange hota hai?</summary><p><span class="placeholder">Shop se confirm karna baaki hai.</span> Aam taur par purane gold ka weight aur purity check karke us din ke rate par exchange hota hai.</p></details>
+    <details><summary>Order kaise karein?</summary><p>Enquiry list banao, phir WhatsApp par bhejo. <span class="placeholder">WhatsApp number abhi add nahi hua hai.</span></p></details>
+  </section>
+
+  <section aria-labelledby="visit-h">
+    <h2 id="visit-h">Visit the Shop</h2>
+    <div class="panel" style="text-align:center">
+      <p><strong>Shop:</strong> Jewelry <span class="placeholder">[name — placeholder]</span><br>
+      <strong>Address:</strong> <span class="placeholder">[address — placeholder]</span><br>
+      <strong>Phone / WhatsApp:</strong> <span class="placeholder">[number — placeholder]</span><br>
+      <strong>Hours:</strong> <span class="placeholder">[timings — placeholder]</span></p>
+      <p class="muted">Map, directions aur “Call now” button tabhi lagenge jab asli address / number mil jayega. Ye section isliye banaya hai taaki customer dukaan tak pahunch sake — bina iske online dekh kar bhi sale nahi hogi.</p>
+    </div>
+  </section>
+</main>
+
+<div class="note"><strong>Order on WhatsApp</strong><br>WhatsApp number abhi add nahi hua hai — number milte hi enquiry list se direct WhatsApp message ban jayega.</div>
+<footer>© Jewelry — draft website v2. Not published to GitHub yet. All prices / details are placeholders.</footer>
+
+<script>
+const PRODUCTS = [
+  {id:"JW-001", name:"Classic Gold Ring", cat:"Rings", price:4999, emoji:"💍", cls:"", weight:"3.2 g", purity:"22K", making:"12%", stock:"In stock", desc:"Elegant everyday gold-finish ring."},
+  {id:"JW-002", name:"Pearl Pendant Necklace", cat:"Necklaces", price:6499, emoji:"📿", cls:"rose", weight:"5.8 g", purity:"22K", making:"12%", stock:"In stock", desc:"Soft pearl pendant on a delicate chain."},
+  {id:"JW-003", name:"Stud Earrings", cat:"Earrings", price:2999, emoji:"✨", cls:"silver", weight:"2.1 g", purity:"18K", making:"10%", stock:"In stock", desc:"Lightweight studs for daily wear."},
+  {id:"JW-004", name:"Gold-Finish Bangle Set", cat:"Bangles", price:5499, emoji:"🪙", cls:"", weight:"8.4 g", purity:"22K", making:"12%", stock:"Only 2 left", desc:"Set of four polished bangles."},
+  {id:"JW-005", name:"Stone Pendant", cat:"Necklaces", price:3999, emoji:"💎", cls:"rose", weight:"4.0 g", purity:"18K", making:"10%", stock:"In stock", desc:"Statement pendant with a coloured stone."},
+  {id:"JW-006", name:"Charm Bracelet", cat:"Bracelets", price:2499, emoji:"🔗", cls:"silver", weight:"3.5 g", purity:"18K", making:"10%", stock:"Out of stock", desc:"Everyday charm bracelet, adjustable fit."}
+];
+const inr = n => "₹" + n.toLocaleString("en-IN");
+let cat="all", q="", sort="featured";
+const enquiry = new Map();
+const grid=document.getElementById("grid");
+function render(){
+  let list=PRODUCTS.filter(p=>(cat==="all"||p.cat===cat)&&(p.name+" "+p.id+" "+p.cat).toLowerCase().includes(q.toLowerCase()));
+  if(sort==="low") list=[...list].sort((a,b)=>a.price-b.price);
+  if(sort==="high") list=[...list].sort((a,b)=>b.price-a.price);
+  if(sort==="name") list=[...list].sort((a,b)=>a.name.localeCompare(b.name));
+  document.getElementById("resultCount").textContent=list.length+" of "+PRODUCTS.length+" products";
+  document.getElementById("noResults").hidden=list.length!==0;
+  grid.innerHTML=list.map(p=>`
+    <article class="card">
+      <div class="tile ${p.cls}" role="img" aria-label="${p.name} — photo placeholder">${p.emoji}</div>
+      <div class="card-body">
+        <span class="tag">${p.cat}</span>
+        <h3>${p.name}</h3>
+        <p class="price">${inr(p.price)} <span class="muted" style="font-weight:normal;font-size:.85rem">(sample)</span></p>
+        <p class="specs">SKU ${p.id} · Weight ${p.weight} · Purity ${p.purity} · Making ${p.making}</p>
+        <p>${p.desc}</p>
+        <p class="stock ${p.stock==="Out of stock"?"out":"in"}">${p.stock}</p>
+        <div class="card-actions">
+          <button class="btn" type="button" data-add="${p.id}" ${p.stock==="Out of stock"?"disabled":""}>${enquiry.has(p.id)?"Added ✓":"Add to enquiry"}</button>
+          <button class="btn secondary" type="button" data-details="${p.id}">Details</button>
+        </div>
+      </div>
+    </article>`).join("");
+}
+grid.addEventListener("click",e=>{
+  const add=e.target.closest("[data-add]");
+  if(add){enquiry.set(add.dataset.add,1); render(); renderEnquiry(); return;}
+  const d=e.target.closest("[data-details]");
+  if(d){const p=PRODUCTS.find(x=>x.id===d.dataset.details); alert(p.name+"\nSKU: "+p.id+"\nPrice: "+inr(p.price)+" (sample)\nWeight: "+p.weight+" · Purity: "+p.purity+" · Making: "+p.making+"\nStock: "+p.stock+"\n\nReal photo, size aur certificate details abhi add hone baaki hain.");}
+});
+document.getElementById("filters").addEventListener("click",e=>{
+  const b=e.target.closest("[data-cat]"); if(!b) return;
+  cat=b.dataset.cat;
+  document.querySelectorAll("#filters .chip").forEach(c=>c.setAttribute("aria-pressed", String(c===b)));
+  render();
+});
+document.getElementById("search").addEventListener("input",e=>{q=e.target.value; render();});
+document.getElementById("sort").addEventListener("change",e=>{sort=e.target.value; render();});
+function enquiryMessage(){
+  if(!enquiry.size) return "";
+  const lines=[...enquiry.keys()].map(id=>{const p=PRODUCTS.find(x=>x.id===id); return `• ${p.name} (${p.id}) — ${inr(p.price)}`});
+  const total=[...enquiry.keys()].reduce((s,id)=>s+PRODUCTS.find(x=>x.id===id).price,0);
+  return "Hello, I want to enquire about:\n"+lines.join("\n")+"\nTotal (sample): "+inr(total)+"\nPlease confirm availability and today's rate.";
+}
+function renderEnquiry(){
+  document.getElementById("enquiryCount").textContent=enquiry.size;
+  const list=document.getElementById("enquiryList");
+  document.getElementById("enquiryEmpty").hidden=enquiry.size!==0;
+  list.innerHTML=[...enquiry.keys()].map(id=>{const p=PRODUCTS.find(x=>x.id===id); return `<li>${p.name} — ${inr(p.price)} <button type="button" data-remove="${id}" aria-label="Remove ${p.name}">Remove</button></li>`}).join("");
+  const total=[...enquiry.keys()].reduce((s,id)=>s+PRODUCTS.find(x=>x.id===id).price,0);
+  const t=document.getElementById("enquiryTotal"); t.hidden=enquiry.size===0; t.textContent="Estimated total (sample): "+inr(total);
+  ["whatsappBtn","copyBtn","clearBtn"].forEach(id=>document.getElementById(id).disabled=enquiry.size===0);
+}
+document.getElementById("enquiryList").addEventListener("click",e=>{const b=e.target.closest("[data-remove]"); if(b){enquiry.delete(b.dataset.remove); render(); renderEnquiry();}});
+document.getElementById("enquiryBtn").addEventListener("click",()=>document.getElementById("enquiryPanel").scrollIntoView({behavior:"smooth"}));
+document.getElementById("copyBtn").addEventListener("click",async()=>{try{await navigator.clipboard.writeText(enquiryMessage()); document.getElementById("copyMsg").textContent="Copied — WhatsApp par paste karke bhej sakte ho.";}catch{ document.getElementById("copyMsg").textContent="Copy nahi hua — message yeh hai:\n"+enquiryMessage();}});
+document.getElementById("clearBtn").addEventListener("click",()=>{enquiry.clear(); render(); renderEnquiry();});
+document.getElementById("whatsappBtn").addEventListener("click",()=>alert("WhatsApp number abhi add nahi hua hai. Number milte hi ye button direct WhatsApp chat kholega."));
+function calc(){
+  const w=parseFloat(document.getElementById("weight").value)||0;
+  const r=parseFloat(document.getElementById("rate").value)||0;
+  const m=parseFloat(document.getElementById("making").value)||0;
+  const base=w*r, making=base*m/100, gst=(base+making)*0.03;
+  document.getElementById("calcResult").textContent="Estimate: "+inr(Math.round(base+making+gst))+"  (Gold ₹"+inr(Math.round(base))+" + Making ₹"+inr(Math.round(making))+" + GST 3% ₹"+inr(Math.round(gst))+")";
+}
+["metal","weight","rate","making"].forEach(id=>document.getElementById(id).addEventListener("input",calc));
+render(); renderEnquiry(); calc();
+</script>
+</body>
+</html>
