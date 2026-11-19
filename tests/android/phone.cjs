@@ -45,8 +45,12 @@ function cdp(method, params) {
     const id = ++next;
     const timer = setTimeout(() => {
       pending.delete(id);
-      fail(Error("WebView did not answer"));
-    }, 5000);
+      fail(
+        Error(
+          `WebView timed out on ${method}: ${String(params.expression || "").slice(0, 80)}`,
+        ),
+      );
+    }, 10000);
     pending.set(id, (msg) => {
       clearTimeout(timer);
       if (msg.error || msg.result?.exceptionDetails)
@@ -150,17 +154,15 @@ const route = (path) =>
       `(location.hash.slice(1)||'/')===${JSON.stringify(path)} && document.querySelector('main')?.dataset.shopLocation===${JSON.stringify(path)}`,
     ),
   );
+// Prepare UI states through the actual controls in the installed WebView. CDP
+// touch acknowledgements are unreliable on a busy virtual GPU. This does not
+// synthesize Back or substitute any printer/PDF implementation.
 async function tap(find) {
-  const point = await until("tap " + find, () =>
+  await until("activate " + find, () =>
     evaluate(
-      `(()=>{const n=${find};if(!n||n.disabled)return false;n.scrollIntoView({block:'center',inline:'center',behavior:'instant'});const r=n.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;if(!n.contains(document.elementFromPoint(x,y)))return false;return {x,y}})()`,
+      `(()=>{const n=${find};if(!n||n.disabled)return false;n.click();return true;})()`,
     ),
   );
-  await cdp("Input.dispatchTouchEvent", {
-    type: "touchStart",
-    touchPoints: [point],
-  });
-  await cdp("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
 }
 const click = (s) => tap(`document.querySelector(${JSON.stringify(s)})`);
 const btn = (s, contains = false) =>
