@@ -768,7 +768,7 @@ export function InvoiceEditor() {
         <label className="search-input full-search">
           <Search size={16} />
           <input
-            autoFocus
+            autoFocus={!window.matchMedia("(pointer: coarse)").matches}
             placeholder="Search product or SKU…"
             value={query}
             onChange={(e) => Q(e.target.value)}

@@ -151,25 +151,29 @@ export function BackNavigation({ children }: { children: ReactNode }) {
       document.querySelector('[data-setup-required="true"]')
     )
       return;
-    const index = Number(history.state?.idx ?? 0),
-      current = loc.pathname + loc.search;
-    for (let prev = index - 1; historyPaths.has(prev); prev--) {
-      const path = historyPaths.get(prev)!;
-      if (
-        path !== current &&
-        /^\/(?:$|(?:billing(?:\/[A-Za-z0-9_-]+)?|inventory|customers|rates|reports|settings)(?:\?|$))/.test(
-          path,
-        )
-      ) {
-        void nav(prev - index);
-        return;
+    // Ask before traversing native history: cancelling must not move or restore
+    // a WebView history entry underneath a financial edit.
+    guard(document, () => {
+      const index = Number(history.state?.idx ?? 0),
+        current = loc.pathname + loc.search;
+      for (let prev = index - 1; historyPaths.has(prev); prev--) {
+        const path = historyPaths.get(prev)!;
+        if (
+          path !== current &&
+          /^\/(?:$|(?:billing(?:\/[A-Za-z0-9_-]+)?|inventory|customers|rates|reports|settings)(?:\?|$))/.test(
+            path,
+          )
+        ) {
+          void nav(prev - index);
+          return;
+        }
       }
-    }
-    if (loc.search) void nav(loc.pathname, { replace: true });
-    else if (loc.pathname !== "/")
-      void nav(loc.pathname.startsWith("/billing/") ? "/billing" : "/", {
-        replace: true,
-      });
+      if (loc.search) void nav(loc.pathname, { replace: true });
+      else if (loc.pathname !== "/")
+        void nav(loc.pathname.startsWith("/billing/") ? "/billing" : "/", {
+          replace: true,
+        });
+    });
   };
   useEffect(() => {
     const edit = (e: Event) => {

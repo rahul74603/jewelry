@@ -137,10 +137,11 @@ afterEach(async (context) => {
         await evaluate("document.body.innerText.slice(-1400)"),
       );
     } catch {}
-    if (focus().includes("printspooler")) {
-      key();
-      await pause(500);
-    }
+    // One failed scenario must not strand all later checks behind its alert.
+    ws.close();
+    ws = null;
+    shell("am", "force-stop", pkg);
+    await attach();
   }
 });
 const route = (path) =>
@@ -249,6 +250,17 @@ async function newSale() {
   await btn("Add product to bill");
   await btn("Heritage gold bangle", true);
   await has(".bill-line", "Heritage gold bangle");
+  await absent(detail);
+  // An IME owns KEYCODE_BACK before an Activity. Test application-level Back
+  // only after the picker's native input surface has actually closed.
+  await pause(350);
+  if (/mInputShown\s*=\s*true/.test(shell("dumpsys", "input_method"))) {
+    key();
+    await until(
+      "IME closed",
+      () => !/mInputShown\s*=\s*true/.test(shell("dumpsys", "input_method")),
+    );
+  }
 }
 test("Dirty bill needs explicit discard; Continue Editing preserves line", async () => {
   await newSale();
@@ -334,28 +346,31 @@ const formats = {
   "80mm": [80, 200],
   "58mm": [58, 200],
 };
+async function prepare(format) {
+  await go("/settings");
+  await btn("Billing & print");
+  await select("Paper format", format);
+  await btn("Save settings");
+  await has(".toast", "saved");
+  await newSale();
+  if (format.endsWith("mm"))
+    for (const name of [
+      "Lotus drop earrings",
+      "Silver anklet pair",
+      "Antique gold chain",
+    ]) {
+      await btn("Add product to bill");
+      await btn(name, true);
+      await absent(detail);
+    }
+  await select("Payment", "full");
+  await btn("Finalize invoice");
+  await btn("Confirm & save");
+  await present(`.receipt[data-format="${format}"]`);
+}
 for (const [format, [mmW, mmH]] of Object.entries(formats)) {
   test(`${format}: actual spooler and Back to receipt`, async () => {
-    await go("/settings");
-    await btn("Billing & print");
-    await select("Paper format", format);
-    await btn("Save settings");
-    await has(".toast", "saved");
-    await newSale();
-    if (format.endsWith("mm"))
-      for (const name of [
-        "Lotus drop earrings",
-        "Silver anklet pair",
-        "Antique gold chain",
-      ]) {
-        await btn("Add product to bill");
-        await btn(name, true);
-        await absent(detail);
-      }
-    await select("Payment", "full");
-    await btn("Finalize invoice");
-    await btn("Confirm & save");
-    await present(`.receipt[data-format="${format}"]`);
+    await prepare(format);
     let xml = await printSheet();
     if (tapNode(xml, /expand_collapse_handle|content-desc="Expand/)) {
       await pause(400);
@@ -384,6 +399,15 @@ for (const [format, [mmW, mmH]] of Object.entries(formats)) {
     await present(".receipt");
   });
   test(`${format}: save a real device PDF and measure every MediaBox`, async () => {
+    if (
+      !(await evaluate(
+        `!!document.querySelector('.receipt[data-format="${format}"]')`,
+      ))
+    )
+      await prepare(format);
+    const beforeFiles = new Set(
+      shell("ls", "-1", "/sdcard/Download").split("\n"),
+    );
     const ref = await evaluate(
       `document.querySelector('.page-head h1').innerText`,
     );
@@ -411,14 +435,16 @@ for (const [format, [mmW, mmH]] of Object.entries(formats)) {
     const file = await until("saved file " + ref, () =>
       shell("ls", "-1", "/sdcard/Download")
         .split("\n")
-        .find((s) => s.startsWith(ref) && s.endsWith(".pdf")),
+        .find(
+          (s) => !beforeFiles.has(s) && s.startsWith(ref) && s.endsWith(".pdf"),
+        ),
     );
-    const bin = execFileSync(
-      "adb",
-      ["exec-out", "cat", "/sdcard/Download/" + file],
-      { maxBuffer: 16 * 1024 * 1024 },
-    );
-    fs.writeFileSync(`${out}/device-${format}.pdf`, bin);
+    execFileSync("adb", [
+      "pull",
+      "/sdcard/Download/" + file,
+      `${out}/device-${format}.pdf`,
+    ]);
+    const bin = fs.readFileSync(`${out}/device-${format}.pdf`);
     const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
     const doc = await getDocument({ data: new Uint8Array(bin) }).promise;
     const pages = [];
