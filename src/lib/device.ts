@@ -1,3 +1,4 @@
+import { rollContent } from "./roll";
 import type { Profile } from "../../functions/src/core/model";
 import { Capacitor, registerPlugin } from "@capacitor/core";
 const native = Capacitor.getPlatform() === "android";
@@ -11,6 +12,12 @@ const vault = registerPlugin<{
     format: Profile["format"];
     documentNumber: string;
   }) => Promise<void>;
+  saveRollPdf: (
+    options: ReturnType<typeof rollContent> & {
+      format: string;
+      documentNumber: string;
+    },
+  ) => Promise<{ saved: boolean }>;
   shareText: (v: { text: string }) => Promise<void>;
 }>("DeviceVault");
 const b64 = (b: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Array(b)));
@@ -103,4 +110,15 @@ export async function shareSummary(title: string, text: string) {
   }
   await navigator.clipboard.writeText(text);
   return "copied";
+}
+
+export const nativeRollExport = native;
+export async function saveRollPdf(
+  format: Profile["format"],
+  documentNumber: string,
+) {
+  const receipt = document.querySelector<HTMLElement>(".receipt");
+  if (!receipt || !native || !format.endsWith("mm"))
+    throw Error("No roll receipt selected.");
+  return vault.saveRollPdf({ format, documentNumber, ...rollContent(receipt) });
 }

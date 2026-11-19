@@ -125,6 +125,7 @@ export function BackNavigation({ children }: { children: ReactNode }) {
     const home =
       loc.pathname === "/" &&
       !loc.search &&
+      (window.location.hash.slice(1) || "/") === "/" &&
       document.querySelector<HTMLElement>("[data-shop-home]");
     if (home) {
       const now = performance.now();

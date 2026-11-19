@@ -425,3 +425,16 @@
   grid-column: 3;
   max-height: 45px;
 }
+.roll-export {
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.roll-export > div {
+  flex: 1;
+  min-width: 160px;
+}
+@media print {
+  .roll-export {
+    display: none !important;
+  }
+}

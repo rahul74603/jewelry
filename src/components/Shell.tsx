@@ -239,6 +239,7 @@ export function Shell() {
           className="content"
           data-setup-required={!p.setupComplete}
           lang={p.language}
+          data-shop-location={loc.pathname + loc.search}
           data-shop-home={
             loc.pathname === "/" && p.setupComplete ? "" : undefined
           }

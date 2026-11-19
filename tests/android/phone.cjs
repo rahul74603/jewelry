@@ -27,12 +27,20 @@ async function until(name, check, ms = 8000) {
     }
     await pause(100);
   } while (Date.now() < deadline);
-  throw Error(`Timed out: ${name}; last=${last}; focus=${focus()}`);
+  const state =
+    ws?.readyState === 1
+      ? await evaluate(
+          `({hash:location.hash,idx:history.state?.idx,title:document.querySelector('h1')?.innerText,modal:document.querySelector('[role=dialog] h2')?.innerText,toast:document.querySelector('.toast')?.innerText})`,
+        ).catch(() => null)
+      : null;
+  throw Error(
+    `Timed out: ${name}; last=${last}; state=${JSON.stringify(state)}; focus=${focus()}`,
+  );
 }
 let ws,
   next = 0;
 const pending = new Map();
-function evaluate(expression) {
+function cdp(method, params) {
   return new Promise((ok, fail) => {
     const id = ++next;
     const timer = setTimeout(() => {
@@ -43,16 +51,25 @@ function evaluate(expression) {
       clearTimeout(timer);
       if (msg.error || msg.result?.exceptionDetails)
         fail(Error(JSON.stringify(msg.error ?? msg.result.exceptionDetails)));
-      else ok(msg.result.result?.value);
+      else ok(msg.result);
     });
     ws.send(
       JSON.stringify({
         id,
-        method: "Runtime.evaluate",
-        params: { expression, returnByValue: true },
+        method,
+        params,
       }),
     );
   });
+}
+async function evaluate(expression) {
+  return (
+    await cdp("Runtime.evaluate", {
+      expression,
+      returnByValue: true,
+      userGesture: true,
+    })
+  ).result?.value;
 }
 async function attach() {
   const qemu =
@@ -127,20 +144,27 @@ afterEach(async (context) => {
   }
 });
 const route = (path) =>
-  until("in-app " + path, () =>
-    evaluate(`(location.hash.slice(1)||'/')===${JSON.stringify(path)}`),
-  );
-const click = (selector) =>
-  until("click " + selector, () =>
+  until("mounted in-app " + path, () =>
     evaluate(
-      `(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n||n.disabled)return false;n.click();return true;})()`,
+      `(location.hash.slice(1)||'/')===${JSON.stringify(path)} && document.querySelector('main')?.dataset.shopLocation===${JSON.stringify(path)}`,
     ),
   );
-const btn = (text, contains = false) =>
-  until("button " + text, () =>
+async function tap(find) {
+  const point = await until("tap " + find, () =>
     evaluate(
-      `(()=>{const n=[...document.querySelectorAll('button')].find(n=>n.offsetWidth>0&&!n.disabled&&n.innerText.trim()${contains ? ".includes(" + JSON.stringify(text) + ")" : "===" + JSON.stringify(text)});if(!n)return false;n.click();return true;})()`,
+      `(()=>{const n=${find};if(!n||n.disabled)return false;n.scrollIntoView({block:'center',inline:'center',behavior:'instant'});const r=n.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;if(!n.contains(document.elementFromPoint(x,y)))return false;return {x,y}})()`,
     ),
+  );
+  await cdp("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [point],
+  });
+  await cdp("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+}
+const click = (s) => tap(`document.querySelector(${JSON.stringify(s)})`);
+const btn = (s, contains = false) =>
+  tap(
+    `[...document.querySelectorAll('button')].find(n=>n.offsetWidth>0&&!n.disabled&&n.innerText.trim()${contains ? ".includes(" + JSON.stringify(s) + ")" : "===" + JSON.stringify(s)})`,
   );
 const present = (selector) =>
   until("visible " + selector, () =>
@@ -169,11 +193,14 @@ const detail = '[role="dialog"][data-state="open"]';
 const foreground = () =>
   until("shop in foreground", () => focus().includes(pkg));
 async function go(path) {
+  await click('[aria-label="Open navigation"]');
+  await present(".sidebar.open");
   await click(`.sidebar a[href="#${path}"]`);
   await route(path);
+  await absent(".drawer-backdrop");
 }
 async function home() {
-  await click(".sidebar .brand-link");
+  await click('.bottom-nav a[href="#/"]');
   await present("[data-shop-home]");
 }
 for (const [name, path, prior] of [
@@ -265,37 +292,73 @@ function dump() {
   shell("uiautomator", "dump", "/sdcard/print-window.xml");
   return shell("cat", "/sdcard/print-window.xml");
 }
-for (const format of ["A4", "A5", "80mm", "58mm"])
-  test(`${format}: open Android PrintManager and Back to receipt`, async () => {
+function tapNode(xml, re) {
+  const n = (xml.match(/<node\b[^>]*>/g) || []).find(
+    (x) => re.test(x) && !x.includes('enabled="false"'),
+  );
+  const box = n?.match(/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]/);
+  if (!box) return false;
+  shell(
+    "input",
+    "tap",
+    String((+box[1] + +box[3]) >> 1),
+    String((+box[2] + +box[4]) >> 1),
+  );
+  return true;
+}
+async function printSheet() {
+  await btn("Print / PDF");
+  await until(
+    "Android print service",
+    () => focus().includes("printspooler"),
+    18000,
+  );
+  let xml = dump();
+  if (!xml.includes("Save as PDF")) {
+    assert.ok(
+      tapNode(xml, /destination_spinner|text="Select a printer"/),
+      "Select destination",
+    );
+    await pause(400);
+    xml = dump();
+    if (/All printers|More printers/i.test(xml))
+      assert.ok(tapNode(xml, /text="Save as PDF"/), "Select PDF printer");
+    xml = dump();
+  }
+  assert.ok(xml.includes("Save as PDF"), "Expected Save as PDF destination");
+  return xml;
+}
+const formats = {
+  A4: [210, 297],
+  A5: [148, 210],
+  "80mm": [80, 200],
+  "58mm": [58, 200],
+};
+for (const [format, [mmW, mmH]] of Object.entries(formats)) {
+  test(`${format}: actual spooler and Back to receipt`, async () => {
     await go("/settings");
     await btn("Billing & print");
     await select("Paper format", format);
     await btn("Save settings");
     await has(".toast", "saved");
     await newSale();
+    if (format.endsWith("mm"))
+      for (const name of [
+        "Lotus drop earrings",
+        "Silver anklet pair",
+        "Antique gold chain",
+      ]) {
+        await btn("Add product to bill");
+        await btn(name, true);
+        await absent(detail);
+      }
     await select("Payment", "full");
     await btn("Finalize invoice");
     await btn("Confirm & save");
     await present(`.receipt[data-format="${format}"]`);
-    await btn("Print / PDF");
-    await until(
-      "Android print spooler",
-      () => focus().includes("printspooler"),
-      18000,
-    );
-    let xml = dump();
-    const handle = (xml.match(/<node\b[^>]*>/g) || []).find((n) =>
-      /(?:expand_collapse_handle|content-desc="Expand)/i.test(n),
-    );
-    const box = handle?.match(/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]/);
-    if (box) {
-      shell(
-        "input",
-        "tap",
-        String((+box[1] + +box[3]) >> 1),
-        String((+box[2] + +box[4]) >> 1),
-      );
-      await pause(500);
+    let xml = await printSheet();
+    if (tapNode(xml, /expand_collapse_handle|content-desc="Expand/)) {
+      await pause(400);
       xml = dump();
     }
     fs.writeFileSync(`${out}/print-${format}.xml`, xml);
@@ -308,20 +371,89 @@ for (const format of ["A4", "A5", "80mm", "58mm"])
       format,
       [...xml.matchAll(/text="([^"<>]+)"/g)].map((m) => m[1]).join(" | "),
     );
-    assert.match(xml, /Save as PDF/i);
-    if (format === "A4" || format === "A5")
-      assert.match(
-        xml,
-        new RegExp(`\\b${format}\\b`, "i"),
-        "Requested ISO size should be selected, not Letter",
+    if (!format.endsWith("mm"))
+      assert.ok(
+        new RegExp(`\\b${format}\\b`, "i").test(xml),
+        "Should select requested ISO media",
       );
     for (let i = 0; i < 3 && focus().includes("printspooler"); i++) {
       key();
-      await pause(450);
+      await pause(500);
     }
     await foreground();
-    await present(`.receipt[data-format="${format}"]`);
+    await present(".receipt");
   });
+  test(`${format}: save a real device PDF and measure every MediaBox`, async () => {
+    const ref = await evaluate(
+      `document.querySelector('.page-head h1').innerText`,
+    );
+    if (format.endsWith("mm")) await btn("Save exact-size PDF");
+    else {
+      await printSheet();
+      await until(
+        "Save PDF button",
+        () => tapNode(dump(), /id\/print_button"/),
+        14000,
+      );
+    }
+    await until(
+      "System file picker",
+      () => /documentsui/i.test(focus()),
+      10000,
+    );
+    await until("Save chosen file", () =>
+      tapNode(dump(), /id\/button_save"|text="SAVE"/i),
+    );
+    await foreground();
+    if (format.endsWith("mm")) await has(".toast", "Roll PDF saved");
+    // The picker belongs to Android, not the sandbox. Read only this test's
+    // named file from the disposable emulator's public Downloads area.
+    const file = await until("saved file " + ref, () =>
+      shell("ls", "-1", "/sdcard/Download")
+        .split("\n")
+        .find((s) => s.startsWith(ref) && s.endsWith(".pdf")),
+    );
+    const bin = execFileSync(
+      "adb",
+      ["exec-out", "cat", "/sdcard/Download/" + file],
+      { maxBuffer: 16 * 1024 * 1024 },
+    );
+    fs.writeFileSync(`${out}/device-${format}.pdf`, bin);
+    const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const doc = await getDocument({ data: new Uint8Array(bin) }).promise;
+    const pages = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const p = await doc.getPage(i),
+        [, , x, y] = p.view;
+      assert.ok(
+        Math.abs(x - (mmW * 72) / 25.4) < 1.2 &&
+          Math.abs(y - (mmH * 72) / 25.4) < 1.2,
+        "Incorrect native MediaBox " + x + "x" + y,
+      );
+      const text = (await p.getTextContent()).items
+        .map((t) => t.str ?? "")
+        .join("")
+        .replace(/\s/g, "");
+      assert.ok(text.length > 4, "Blank native page");
+      pages.push(text);
+      if (i === 1)
+        console.log("DEVICE_PDF", format, doc.numPages, "pages;", x, y, "pt");
+    }
+    const all = pages.join("").toLowerCase();
+    for (const t of [
+      "Heritagegoldbangle",
+      "Grandtotal",
+      "Payment",
+      "Authorisedsignature",
+    ])
+      assert.ok(all.includes(t.toLowerCase()), "Missing " + t);
+    if (format.endsWith("mm")) {
+      assert.ok(doc.numPages >= 2);
+      assert.ok(all.includes("Antiquegoldchain".toLowerCase()));
+    }
+    await doc.destroy();
+  });
+}
 test("Second Back within two seconds finishes, not minimizes, the Dashboard", async () => {
   await home();
   key();

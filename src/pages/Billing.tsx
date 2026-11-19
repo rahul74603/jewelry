@@ -53,7 +53,12 @@ import {
 import { markSaved } from "../lib/navigation";
 import { useShop, useToast } from "../lib/store";
 import { rupee, day, key, err, cash } from "../lib/format";
-import { printDocument, shareSummary } from "../lib/device";
+import {
+  printDocument,
+  shareSummary,
+  nativeRollExport,
+  saveRollPdf,
+} from "../lib/device";
 import {
   PageHead,
   Records,
@@ -907,6 +912,41 @@ export function InvoiceDetail() {
           Print / PDF
         </button>
       </PageHead>
+      {nativeRollExport && (note?.shop ?? b.shop).format.endsWith("mm") && (
+        <div className="info-box roll-export">
+          <div>
+            <strong>Exact-size roll PDF</strong>
+            <p>
+              Android’s print service may substitute Letter. Save a true{" "}
+              {(note?.shop ?? b.shop).format} PDF without changing the bill.
+            </p>
+          </div>
+          <button
+            className="btn outline"
+            disabled={busy}
+            onClick={async () => {
+              B(true);
+              try {
+                if (
+                  (
+                    await saveRollPdf(
+                      (note?.shop ?? b.shop).format,
+                      note?.number ?? b.number,
+                    )
+                  ).saved
+                )
+                  notify("Roll PDF saved.");
+              } catch (e) {
+                E(err(e));
+              } finally {
+                B(false);
+              }
+            }}
+          >
+            Save exact-size PDF
+          </button>
+        </div>
+      )}
       <Problem message={error} />
       <InvoiceReceipt bill={b} sample={demo} credit={!!note} />
       <div className="document-actions">
