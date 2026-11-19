@@ -19,7 +19,11 @@ import {
 } from "lucide-react";
 import { useShop, useToast } from "../lib/store";
 import { rupee, cash, err, day } from "../lib/format";
-import { profileSchema, type Profile } from "../../functions/src/core/model";
+import {
+  profileSchema,
+  stableJson,
+  type Profile,
+} from "../../functions/src/core/model";
 import { indiaDay, saleInvoices } from "../../functions/src/core/billing";
 import {
   PageHead,
@@ -319,7 +323,7 @@ export function Settings() {
       </div>
       <form
         className="panel settings-panel"
-        data-unsaved={JSON.stringify(p) !== JSON.stringify(data.profile)}
+        data-unsaved={stableJson(p) !== stableJson(data.profile)}
         data-saving={busy}
         onSubmit={async (e) => {
           e.preventDefault();

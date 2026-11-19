@@ -103,7 +103,6 @@ jobs:
         with: { node-version: '22', cache: npm }
       - uses: actions/download-artifact@v4
         with: { name: aurum-phone-preview, path: phone }
-      - run: npm ci
       - name: Enable hosted KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -116,9 +115,7 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          script: |
-            adb install -r phone/aurum-phone-preview.apk
-            node --test tests/android/phone.cjs
+          script: bash tests/android/run.sh
       - if: always()
         uses: actions/upload-artifact@v4
         with: { name: android-print-dialogs, path: test-results/phone/, retention-days: 14 }

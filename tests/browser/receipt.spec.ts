@@ -41,13 +41,11 @@ async function branding(p: Page, format: string) {
     x.fillText("TA", 28, 30);
     return c.toDataURL().split(",")[1];
   });
-  await p
-    .locator("input[type=file]")
-    .setInputFiles({
-      name: "shop.png",
-      mimeType: "image/png",
-      buffer: Buffer.from(png, "base64"),
-    });
+  await p.locator("input[type=file]").setInputFiles({
+    name: "shop.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(png, "base64"),
+  });
   await expect(p.locator(".logo-preview img")).toBeVisible();
   await button(p, "Billing & print").click();
   await combo(p, "Paper format").selectOption(format);
@@ -144,8 +142,12 @@ for (const [format, w, h] of [
       for (const item of items) {
         if (!("str" in item) || !item.str.trim()) continue;
         const [left, base] = item.transform.slice(-2);
-        expect(left, item.str).toBeGreaterThanOrEqual(-1);
-        expect(left + item.width, item.str).toBeLessThanOrEqual(x + 1);
+        const margin =
+          ({ A4: 9, A5: 6, "80mm": 3, "58mm": 2 }[format] * 72) / 25.4;
+        expect(left, item.str).toBeGreaterThanOrEqual(margin - 1);
+        expect(left + item.width, item.str).toBeLessThanOrEqual(
+          x - margin + 0.5,
+        );
         expect(base, item.str).toBeGreaterThan(0);
         expect(base, item.str).toBeLessThan(y);
       }
@@ -266,4 +268,59 @@ test("Advance records a customer deposit with purpose, not a taxable item sale",
   await expect(r).toContainText("Bangle order");
   await expect(r).not.toContainText("Jewellery items");
   await expect(r).not.toContainText("Taxable value");
+});
+
+test("Silver Payal is one uncluttered A4 page: actual ₹2,100, no tax/empty contacts", async ({
+  page,
+}, info) => {
+  await branding(page, "A4");
+  await open(page, "/inventory");
+  await button(page, "Add product").click();
+  const dialog = page.getByRole("dialog");
+  for (const [name, value] of [
+    ["Product name", "चाँदी पायल / Silver Payal"],
+    ["SKU / barcode", "PAYAL-1"],
+    ["Category", "Payal"],
+    ["Metal", "Silver"],
+    ["Purity", "Fine"],
+    ["Gross weight / piece (g)", "10"],
+    ["Default making amount / rate", "200"],
+  ])
+    await dialog.getByLabel(name, { exact: true }).fill(value);
+  await dialog
+    .getByRole("button", { name: "Add product", exact: true })
+    .click();
+  await expect(dialog).toBeHidden();
+  await open(page, "/rates");
+  await page
+    .getByRole("button", { name: /Update rate/ })
+    .first()
+    .click();
+  await dialog.locator("input[name=metal]").fill("Silver");
+  await dialog.getByLabel("Purity", { exact: true }).fill("Fine");
+  await dialog.getByLabel(/per gram/).fill("200");
+  await dialog.getByRole("button", { name: /Record rate/ }).click();
+  await expect(dialog).toBeHidden();
+  await open(page, "/billing/new");
+  await add(page, "Silver Payal");
+  await page.getByRole("button", { name: /Adjust making/ }).click();
+  await page.getByLabel("Line discount (₹)").fill("100");
+  await page
+    .getByRole("combobox", { name: "Payment", exact: true })
+    .selectOption("full");
+  await save(page);
+  const r = page.locator(".receipt");
+  await expect(r).toContainText("₹2,100.00");
+  await expect(r.locator(".paper-title h3")).toHaveText("NON-GST BILL");
+  await expect(r).not.toContainText(/GSTIN|HSN|SGST|IGST|CGST|undefined|null/);
+  await page.emulateMedia({ media: "print" });
+  await page.evaluate(() => document.fonts.ready);
+  const pdf = await page.pdf({
+    preferCSSPageSize: true,
+    printBackground: true,
+  });
+  const doc = await getDocument({ data: new Uint8Array(pdf) }).promise;
+  expect(doc.numPages).toBe(1);
+  await writeFile(info.outputPath("Payal-A4.pdf"), pdf);
+  await doc.destroy();
 });

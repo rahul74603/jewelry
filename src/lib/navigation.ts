@@ -16,10 +16,12 @@ export function markSaved(scope: ParentNode | null) {
   if (!scope) return;
   const nodes = [
     ...(scope instanceof Element ? [scope] : []),
-    ...scope.querySelectorAll(selector),
+    ...scope.querySelectorAll(selector + ', [data-saving="true"]'),
   ];
   for (const el of nodes) {
-    el.removeAttribute("data-unsaved");
+    if (el.hasAttribute("data-unsaved"))
+      el.setAttribute("data-unsaved", "false");
+    if (el.hasAttribute("data-saving")) el.setAttribute("data-saving", "false");
     el.removeAttribute("data-edited");
   }
 }

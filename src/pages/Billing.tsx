@@ -873,7 +873,7 @@ export function InvoiceDetail() {
       ? `${note.shop.shopName} · Credit note ${note.number} against ${b.number} · ${rupee(b.totalPaise, 2)}`
       : `${demo ? "SAMPLE · " : ""}${b.shop.shopName} · ${b.number}\n${day(b.issuedAt)}\nTotal ${rupee(b.totalPaise, 2)} · Balance ${rupee(b.balancePaise, 2)}`;
     try {
-      if ((await shareSummary(b.number, text)) === "copied")
+      if ((await shareSummary(note?.number ?? b.number, text)) === "copied")
         notify("Invoice summary copied for sharing.");
     } catch (e) {
       if ((e as Error).name !== "AbortError") E(err(e));
@@ -897,7 +897,10 @@ export function InvoiceDetail() {
         <button
           className="btn primary"
           onClick={() =>
-            printDocument((note?.shop ?? b.shop).format).catch((e) => E(err(e)))
+            printDocument(
+              (note?.shop ?? b.shop).format,
+              note?.number ?? b.number,
+            ).catch((e) => E(err(e)))
           }
         >
           <Printer size={16} />
@@ -944,6 +947,7 @@ export function InvoiceDetail() {
             " A full credit note will reference this bill. Confirm only after arranging any repayment using the original tender(s)."}
         </p>
         <form
+          data-saving={busy}
           onSubmit={async (e) => {
             e.preventDefault();
             B(true);

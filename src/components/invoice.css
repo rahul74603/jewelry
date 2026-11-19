@@ -196,6 +196,8 @@
 }
 .receipt .receipt-totals dd {
   text-align: right;
+  white-space: nowrap;
+  flex-shrink: 0;
   font-weight: 550;
 }
 .receipt .receipt-totals .paper-total {
@@ -371,8 +373,10 @@
   }
 }
 @media print {
+  /* Leave a glyph-safe trailing inset: WebView rounds CSS mm to device pixels
+   * before clipping at the printable area, particularly on 58 mm stock. */
   .receipt[data-format] {
-    width: 100%;
+    width: calc(100% - 1.5mm);
     max-width: none;
     margin: 0;
     box-shadow: none;

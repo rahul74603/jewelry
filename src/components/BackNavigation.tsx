@@ -18,6 +18,7 @@ import {
   historyPaths,
 } from "../lib/navigation";
 
+const saving = () => !!document.querySelector('[data-saving="true"]');
 function overlay() {
   // Radix portals are appended in stack order. Native select/IME and the Android
   // print activity consume their own Back before it reaches our activity.
@@ -53,6 +54,7 @@ export function BackNavigation({ children }: { children: ReactNode }) {
     keep: () => void;
   } | null>(null);
   const guard = useCallback((scope: ParentNode | null, close: () => void) => {
+    if (saving()) return;
     if (isDirty(scope)) {
       P({
         discard: () => {
@@ -70,6 +72,7 @@ export function BackNavigation({ children }: { children: ReactNode }) {
         nextLocation.pathname + nextLocation.search
       )
         return false;
+      if (saving()) return true;
       const top = overlay();
       return (
         isDirty(document) ||
@@ -81,6 +84,10 @@ export function BackNavigation({ children }: { children: ReactNode }) {
   );
   useEffect(() => {
     if (blocker.state !== "blocked") return;
+    if (saving()) {
+      blocker.reset();
+      return;
+    }
     const top = overlay();
     if (
       top &&
@@ -108,7 +115,7 @@ export function BackNavigation({ children }: { children: ReactNode }) {
   }, [loc.key, loc.pathname, loc.search]);
   const back = useRef(() => {});
   back.current = () => {
-    if (document.querySelector('[data-saving="true"]')) return;
+    if (saving()) return;
     const top = overlay();
     if (top) {
       armed.current = null;
@@ -166,7 +173,8 @@ export function BackNavigation({ children }: { children: ReactNode }) {
   useEffect(() => {
     const edit = (e: Event) => {
       const form = e.target instanceof Element && e.target.closest("form");
-      if (form) form.dataset.edited = "true";
+      if (form && !form.hasAttribute("data-unsaved"))
+        form.dataset.edited = "true";
     };
     const unload = (e: BeforeUnloadEvent) => {
       if (isDirty(document)) {

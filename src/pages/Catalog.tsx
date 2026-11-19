@@ -72,7 +72,7 @@ function ProductForm({ close }: { close: () => void }) {
   const {
     register,
     handleSubmit,
-    formState: { errors, isSubmitting },
+    formState: { errors, isSubmitting, isDirty },
   } = useForm<Product>({
     resolver: zodResolver(productSchema),
     defaultValues: {
@@ -95,6 +95,8 @@ function ProductForm({ close }: { close: () => void }) {
   });
   return (
     <form
+      data-unsaved={isDirty}
+      data-saving={isSubmitting}
       onSubmit={handleSubmit(async (v) => {
         try {
           await perform("product", v);
@@ -214,6 +216,7 @@ function ProductDetail({ product: p }: { product: Product }) {
         </button>
       ) : (
         <form
+          data-saving={busy}
           onSubmit={async (ev) => {
             ev.preventDefault();
             B(true);
@@ -407,7 +410,7 @@ function CustomerForm({ close }: { close: () => void }) {
   const {
     register,
     handleSubmit,
-    formState: { errors, isSubmitting },
+    formState: { errors, isSubmitting, isDirty },
   } = useForm<Customer>({
     resolver: zodResolver(customerSchema),
     defaultValues: {
@@ -421,6 +424,8 @@ function CustomerForm({ close }: { close: () => void }) {
   });
   return (
     <form
+      data-unsaved={isDirty}
+      data-saving={isSubmitting}
       onSubmit={handleSubmit(async (v) => {
         try {
           await perform("customer", v);
@@ -705,7 +710,7 @@ export function MetalRates() {
         routePanel
         onClose={closePanel}
       >
-        <form onSubmit={add}>
+        <form onSubmit={add} data-saving={busy}>
           <div className="form-grid">
             <Field label="Metal">
               <input

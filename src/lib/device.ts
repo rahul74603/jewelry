@@ -7,7 +7,10 @@ const vault = registerPlugin<{
     slot: string;
     message: string;
   }) => Promise<{ signature: string }>;
-  printInvoice: (options: { format: Profile["format"] }) => Promise<void>;
+  printInvoice: (options: {
+    format: Profile["format"];
+    documentNumber: string;
+  }) => Promise<void>;
   shareText: (v: { text: string }) => Promise<void>;
 }>("DeviceVault");
 const b64 = (b: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Array(b)));
@@ -75,14 +78,17 @@ export async function deviceIdentity(uid: string) {
           ),
   };
 }
-export async function printDocument(format: Profile["format"]) {
+export async function printDocument(
+  format: Profile["format"],
+  documentNumber: string,
+) {
   await document.fonts.ready;
   await Promise.all(
     Array.from(document.querySelectorAll<HTMLImageElement>(".receipt img")).map(
       (img) => img.decode(),
     ),
   );
-  if (native) await vault.printInvoice({ format });
+  if (native) await vault.printInvoice({ format, documentNumber });
   else window.print();
 }
 
