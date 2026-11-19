@@ -1,0 +1,8 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Auth alone is not a license or device proof. All tenant and control-plane
+    // access goes through the narrowly scoped, proof-checked server functions.
+    match /{document=**} { allow read, write: if false; }
+  }
+}

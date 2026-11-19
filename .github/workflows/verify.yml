@@ -1,0 +1,58 @@
+name: Verify billing and tenant security
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions: { contents: read }
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  core-and-cloud:
+    name: Billing, license and cross-tenant acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v5
+        with: { node-version: "22", cache: npm }
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: "21" }
+      - run: npm ci && npm --prefix functions ci
+      - run: npm test && npm --prefix functions run build
+      - name: Auth, Firestore rules, device races and financial transactions
+        run: |
+          set -o pipefail
+          npx --yes firebase-tools@15.36.0 emulators:exec --only auth,firestore,functions --project demo-aurum 'npm --prefix functions run test:emulator' 2>&1 | tee "$RUNNER_TEMP/acceptance.log" || {
+            grep -E '(not ok|error:|Error:)' "$RUNNER_TEMP/acceptance.log" | tail -10 | while IFS= read -r line; do printf '::error::%s\n' "$line"; done
+            exit 1
+          }
+  web:
+    name: Phone layout and browser billing flows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v5
+        with: { node-version: "22", cache: npm }
+      - run: npm ci && npm run build
+      - name: Test compiled demo in the runner's installed Chrome
+        run: |
+          set -euo pipefail
+          if browser="$(command -v google-chrome || command -v chromium)"; then
+            export PLAYWRIGHT_CHROMIUM_EXECUTABLE="$browser"
+            "$browser" --version
+          else
+            npx playwright install chromium
+          fi
+          npx playwright test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: invoice-layout-pdfs
+          path: test-results/**/*.pdf
+          if-no-files-found: error
+          retention-days: 14
