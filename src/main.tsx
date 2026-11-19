@@ -1,6 +1,7 @@
 import React, { lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
-import { HashRouter } from "react-router-dom";
+import { createHashRouter, RouterProvider } from "react-router-dom";
+import { BackNavigation } from "./components/BackNavigation";
 import { Feedback } from "./lib/store";
 import "./styles.css";
 const Root =
@@ -29,21 +30,29 @@ class Boundary extends React.Component<
     return this.props.children;
   }
 }
+const router = createHashRouter([
+  {
+    path: "*",
+    element: (
+      <Feedback>
+        <BackNavigation>
+          <Suspense
+            fallback={
+              <div className="spinner-page">
+                <i />
+                Opening workspace…
+              </div>
+            }
+          >
+            <Root />
+          </Suspense>
+        </BackNavigation>
+      </Feedback>
+    ),
+  },
+]);
 createRoot(document.getElementById("root")!).render(
   <Boundary>
-    <HashRouter>
-      <Feedback>
-        <Suspense
-          fallback={
-            <div className="spinner-page">
-              <i className="spinner" />
-              Opening workspace…
-            </div>
-          }
-        >
-          <Root />
-        </Suspense>
-      </Feedback>
-    </HashRouter>
+    <RouterProvider router={router} />
   </Boundary>,
 );

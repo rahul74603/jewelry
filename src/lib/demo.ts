@@ -21,11 +21,17 @@ import {
   assertDraftPayment,
   postings,
 } from "../../functions/src/core/billing";
+import {
+  allocations,
+  accountDelta,
+  documentNumber,
+  isSale,
+} from "../../functions/src/core/documents";
 export function seedDemo(): Workspace {
   const profile = {
-    ...makeProfile("Pawan Jewellers", "Pawan Verma", "pawan@example.invalid"),
+    ...makeProfile("Sample Jewellery Studio", "Studio Owner", ""),
     mobile: "",
-    address: "Demo showroom · Bhopal, Madhya Pradesh",
+    address: "",
     setupComplete: true,
   };
   const w = emptyWorkspace(profile);
@@ -161,14 +167,22 @@ export function seedDemo(): Workspace {
         paid: 0,
         mode: (["UPI", "Cash", "Card", "Bank"] as const)[(day + j) % 4],
       };
-      const b = calculateInvoice(w, input, when, `INV-${seq}`, false);
+      const b = calculateInvoice(
+        w,
+        input,
+        when,
+        `${profile.prefix}-${seq}`,
+        false,
+      );
       input.paid = Number(
         (
           (b.totalPaise / 100) *
           (day < 7 ? (j === 1 ? 0.4 : j === 2 ? 0.68 : 1) : 1)
         ).toFixed(2),
       );
-      w.invoices.push(calculateInvoice(w, input, when, `INV-${seq}`, false));
+      w.invoices.push(
+        calculateInvoice(w, input, when, `${profile.prefix}-${seq}`, false),
+      );
     }
   }
   return w;
@@ -204,6 +218,7 @@ export function demoMutation(
     p.stock += a.delta;
   } else if (action === "draft") {
     const i = draftSchema.parse(raw);
+    allocations(i);
     if (d.invoices.some((b) => b.id === i.id))
       throw Error("Already finalized.");
     d.drafts = d.drafts.filter((b) => b.id !== i.id);
@@ -225,13 +240,17 @@ export function demoMutation(
       d,
       i,
       at,
-      `${i.type === "Estimate" ? "EST" : d.profile.prefix}-${1001 + d.invoices.length}`,
+      documentNumber(d.profile, i.type, 1001 + d.invoices.length),
     );
     assertReviewedPayment(b, confirmation);
     assertDraftPayment(
       i,
       d.drafts.find((draft) => draft.id === i.id),
     );
+    if (b.customer && b.type !== "Estimate")
+      b.previousBalancePaise = d.invoices
+        .filter((x) => !x.voidedAt && x.customer?.id === b.customer?.id)
+        .reduce((n, x) => n + accountDelta(x), 0);
     d.invoices.push(b);
     if (source) source.convertedTo = i.id;
     postings(b).movements.forEach((m) => {
@@ -243,6 +262,21 @@ export function demoMutation(
     if (!b || b.voidedAt || b.convertedTo)
       throw Error("Document cannot be voided.");
     b.voidedAt = at;
+    if (isSale(b))
+      b.creditNote = {
+        number: documentNumber(
+          d.profile,
+          "Credit note",
+          1 + d.invoices.filter((x) => x.creditNote).length,
+        ),
+        issuedAt: at,
+        reason: (raw as { reason: string }).reason,
+        shop: {
+          ...structuredClone(d.profile),
+          gstin: b.shop.gstin,
+          gstRegistered: b.shop.gstRegistered,
+        },
+      };
     postings(b, true).movements.forEach((m) => {
       d.products.find((p) => p.id === m.productId)!.stock += m.delta;
     });

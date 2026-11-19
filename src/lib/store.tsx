@@ -24,14 +24,16 @@ export const useShop = () => {
   if (!s) throw Error("Workspace required");
   return s;
 };
-const Toast = createContext<(message: string) => void>(() => {});
+const Toast = createContext<(message: string, duration?: number) => void>(
+  () => {},
+);
 export const useToast = () => useContext(Toast);
 export function Feedback({ children }: { children: ReactNode }) {
   const [msg, setMsg] = useState<{ text: string; id: number } | null>(null);
-  const notify = useCallback((text: string) => {
+  const notify = useCallback((text: string, duration = 4500) => {
     const id = Date.now();
     setMsg({ text, id });
-    setTimeout(() => setMsg((m) => (m?.id === id ? null : m)), 4500);
+    setTimeout(() => setMsg((m) => (m?.id === id ? null : m)), duration);
   }, []);
   return (
     <Toast.Provider value={notify}>

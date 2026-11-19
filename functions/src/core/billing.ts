@@ -1,4 +1,5 @@
 import Decimal from "decimal.js";
+import { allocations, isSale, taxComponents, accountDelta } from "./documents";
 import {
   invoiceSchema,
   type Invoice,
@@ -58,6 +59,38 @@ export function calculateInvoice(
     : null;
   if (input.customerId && !customer)
     throw Error("Customer not found in this shop.");
+  allocations(input);
+  if (input.type === "Advance receipt") {
+    if (
+      !customer ||
+      !input.advanceFor ||
+      input.paid <= 0 ||
+      input.items.length ||
+      input.sourceEstimate
+    )
+      throw Error(
+        "An advance requires a named customer, a purpose and a positive amount, without sale items.",
+      );
+    const received = paise(input.paid);
+    return {
+      id: input.id,
+      number,
+      issuedAt,
+      type: input.type,
+      customer: { ...customer },
+      shop: structuredClone(profile),
+      lines: [],
+      input,
+      mode: input.mode,
+      subtotalPaise: 0,
+      taxPaise: 0,
+      roundOffPaise: 0,
+      totalPaise: received,
+      paidPaise: received,
+      balancePaise: 0,
+    };
+  }
+  if (!input.items.length) throw Error("Add at least one item.");
   const rates = currentRates(data.rates, Date.parse(issuedAt));
   const used = new Set<string>();
   const lines: BillLine[] = input.items.map((i) => {
@@ -98,7 +131,18 @@ export function calculateInvoice(
     if (input.type === "GST invoice" && !rule)
       throw Error(`No effective GST rule for HSN ${p.hsn || "(missing)"}.`);
     const taxPercent = input.type === "GST invoice" ? rule!.percent : 0,
-      taxPaise = D(taxablePaise).times(taxPercent).div(100).round().toNumber();
+      components =
+        input.type === "GST invoice" && input.placeOfSupply
+          ? taxComponents(
+              profile.gstin,
+              input.placeOfSupply,
+              taxablePaise,
+              taxPercent,
+            )
+          : undefined,
+      taxPaise = components
+        ? Object.values(components).reduce((a, b) => a + b, 0)
+        : D(taxablePaise).times(taxPercent).div(100).round().toNumber();
     const totalPaise = taxablePaise + taxPaise;
     if (!Number.isSafeInteger(totalPaise) || totalPaise > 1e13)
       throw Error("Line value exceeds the supported billing limit.");
@@ -122,6 +166,7 @@ export function calculateInvoice(
       otherPaise,
       discountPaise,
       taxablePaise,
+      ...(components ? { components } : {}),
       taxPercent,
       taxPaise,
       totalPaise,
@@ -187,6 +232,8 @@ export function assertDraftPayment(input: InvoiceInput, draft?: InvoiceInput) {
     draft &&
     (draft.paid !== input.paid ||
       draft.mode !== input.mode ||
+      JSON.stringify(allocations(draft)) !==
+        JSON.stringify(allocations(input)) ||
       (draft.settlement !== undefined && draft.settlement !== input.settlement))
   )
     throw Error(
@@ -204,19 +251,21 @@ export function postings(b: Invoice, reverse = false) {
           kind: reverse ? "Sale reversal" : "Sale out",
         })),
         received: b.paidPaise * factor,
-        receivable: b.balancePaise * factor,
+        receivable: accountDelta(b) * factor,
       };
 }
 export const saleInvoices = (data: Workspace) =>
-  data.invoices.filter((i) => i.type !== "Estimate" && !i.voidedAt);
+  data.invoices.filter((i) => isSale(i) && !i.voidedAt);
 export function paymentStatus(i: Invoice) {
   return i.voidedAt
     ? "Voided"
-    : i.type === "Estimate"
-      ? "Estimate"
-      : i.balancePaise === 0
-        ? "Paid"
-        : i.paidPaise === 0
-          ? "Unpaid"
-          : "Partial";
+    : i.type === "Advance receipt"
+      ? "Received"
+      : i.type === "Estimate"
+        ? "Estimate"
+        : i.balancePaise === 0
+          ? "Paid"
+          : i.paidPaise === 0
+            ? "Unpaid"
+            : "Partial";
 }

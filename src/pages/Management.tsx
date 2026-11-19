@@ -30,6 +30,11 @@ import {
   Empty,
   GemMark,
 } from "../components/ui";
+import { markSaved } from "../lib/navigation";
+import {
+  accountDocuments,
+  allocations,
+} from "../../functions/src/core/documents";
 import { InvoiceTable } from "./Dashboard";
 function downloadCsv(rows: (string | number)[][]) {
   const cell = (v: string | number) =>
@@ -55,13 +60,16 @@ export function Reports() {
   const bills = saleInvoices(data).filter(
     (b) => indiaDay(b.issuedAt) >= indiaDay(Date.now() - (days - 1) * 86400000),
   );
+  const receipts = accountDocuments(data).filter(
+    (b) => indiaDay(b.issuedAt) >= indiaDay(Date.now() - (days - 1) * 86400000),
+  );
   const total = bills.reduce((s, b) => s + b.totalPaise, 0),
     net = bills.reduce((s, b) => s + b.subtotalPaise, 0),
     cost = bills.reduce(
       (s, b) => s + b.lines.reduce((a, l) => a + l.costPaise, 0),
       0,
     ),
-    paid = bills.reduce((s, b) => s + b.paidPaise, 0);
+    paid = receipts.reduce((s, b) => s + b.paidPaise, 0);
   const metals = new Map<
     string,
     { id: string; pieces: number; net: number; sales: number }
@@ -82,9 +90,10 @@ export function Reports() {
   );
   const modes = ["Cash", "UPI", "Bank", "Card", "Other"].map((m) => ({
     id: m,
-    amount: bills
-      .filter((b) => b.mode === m)
-      .reduce((s, b) => s + b.paidPaise, 0),
+    amount: receipts
+      .flatMap((b) => allocations(b.input))
+      .filter((t) => t.mode === m)
+      .reduce((s, t) => s + t.amountPaise, 0),
   }));
   return (
     <>
@@ -131,7 +140,9 @@ export function Reports() {
                 b.totalPaise / 100,
                 b.paidPaise / 100,
                 b.balancePaise / 100,
-                b.mode,
+                allocations(b.input)
+                  .map((t) => `${t.mode}: ${t.amountPaise / 100}`)
+                  .join("; "),
               ]),
             ])
           }
@@ -277,8 +288,10 @@ export function Settings() {
       )
         throw Error("Each HSN can have only one rule per effective date.");
       await perform("profile", parsed);
+      markSaved(document.querySelector(".settings-panel"));
+      F(parsed);
       notify("Shop settings saved.");
-      if (setup) P({});
+      if (setup) P({}, { replace: true });
     } catch (e) {
       E(err(e));
     } finally {
@@ -306,6 +319,8 @@ export function Settings() {
       </div>
       <form
         className="panel settings-panel"
+        data-unsaved={JSON.stringify(p) !== JSON.stringify(data.profile)}
+        data-saving={busy}
         onSubmit={async (e) => {
           e.preventDefault();
           if (setup && tab !== "Tax settings") {
@@ -428,6 +443,35 @@ export function Settings() {
                 ))}
               </Select>
             </Field>
+            <label className="check-line full">
+              <input
+                type="checkbox"
+                checked={!!p.showOwner}
+                onChange={(e) => set("showOwner", e.target.checked)}
+              />
+              Print owner name
+            </label>
+            {(
+              [
+                ["invoiceFooter", "Thank-you message", 240],
+                ["exchangePolicy", "Return / exchange policy", 600],
+                ["invoiceTerms", "Invoice terms", 1000],
+              ] as const
+            ).map(([key, label, max]) => (
+              <Field key={key} label={label} full>
+                <textarea
+                  rows={2}
+                  maxLength={max}
+                  value={
+                    p[key] ??
+                    (key === "invoiceFooter"
+                      ? "Thank you for your business."
+                      : "")
+                  }
+                  onChange={(e) => set(key, e.target.value)}
+                />
+              </Field>
+            ))}
             <label className="check-line full">
               <input
                 type="checkbox"

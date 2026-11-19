@@ -27,6 +27,9 @@ import {
 } from "lucide-react";
 import {
   draftSchema,
+  finalizeSchema,
+  tenderModes,
+  type TenderMode,
   type FinalizeInput,
   type Invoice,
   type InvoiceInput,
@@ -41,6 +44,13 @@ import {
   paymentStatus,
   currentRates,
 } from "../../functions/src/core/billing";
+import { InvoiceReceipt } from "../components/InvoiceReceipt";
+import {
+  allocations,
+  supplyStates,
+  isSale,
+} from "../../functions/src/core/documents";
+import { markSaved } from "../lib/navigation";
 import { useShop, useToast } from "../lib/store";
 import { rupee, day, key, err, cash } from "../lib/format";
 import { printDocument, shareSummary } from "../lib/device";
@@ -174,12 +184,13 @@ export function InvoiceEditor() {
       );
     if (d) return { ...d };
     if (copy) {
-      const { sourceEstimate: _, ...original } = copy.input;
+      const { sourceEstimate: _, tenders: __, ...original } = copy.input;
       return {
         ...original,
         id: key(),
         type: params.has("convert") ? "Non-GST bill" : copy.type,
         paid: 0,
+        mode: copy.mode === "Split" ? "Cash" : copy.mode,
         settlement: "part",
         ...(params.has("convert") ? { sourceEstimate: copy.id } : {}),
       };
@@ -194,6 +205,8 @@ export function InvoiceEditor() {
       mode: "Cash",
     };
   });
+  const [initial] = useState(invoice);
+  const advance = invoice.type === "Advance receipt";
   const [review, setReview] = useState<FinalizeInput | null>(null),
     [error, E] = useState(""),
     [busy, B] = useState(false),
@@ -210,12 +223,23 @@ export function InvoiceEditor() {
       invoice.items.map((i, k) => (k === n ? { ...i, ...v } : i)),
     );
   const preview = useMemo(() => {
-    if (!invoice.items.length) return { b: null, e: "" };
+    if (
+      advance
+        ? !invoice.paid || !invoice.advanceFor || !invoice.customerId
+        : !invoice.items.length
+    )
+      return { b: null, e: "" };
     try {
       return {
         b: calculateInvoice(
           data,
-          { ...invoice, paid: 0, settlement: "part" },
+          {
+            ...invoice,
+            paid: advance ? invoice.paid : 0,
+            mode: "Cash",
+            tenders: undefined,
+            settlement: "part",
+          },
           new Date().toISOString(),
           "Preview",
           false,
@@ -226,7 +250,7 @@ export function InvoiceEditor() {
     } catch (e) {
       return { b: null, e: err(e) };
     }
-  }, [data, invoice]);
+  }, [data, invoice, advance]);
   const total = preview.b?.totalPaise ?? 0,
     settlement = paymentSelection(invoice, total);
   const setPayment = (
@@ -236,12 +260,42 @@ export function InvoiceEditor() {
     E("");
     I((s) => ({ ...s, paid, settlement }));
   };
-  const paymentInput = () =>
-    draftSchema.parse({
+  const switchMode = (mode: InvoiceInput["mode"]) =>
+    I(({ tenders, ...s }) => ({
+      ...s,
+      mode,
+      ...(mode === "Split"
+        ? {
+            tenders:
+              s.paid > 0 && s.mode !== "Split"
+                ? [{ mode: s.mode, amount: s.paid }]
+                : [],
+          }
+        : {}),
+    }));
+  const split = (mode: TenderMode, amount: number) =>
+    I((s) => {
+      const tenders = [
+        ...(s.tenders ?? []).filter((x) => x.mode !== mode),
+        ...(amount > 0 ? [{ mode, amount }] : []),
+      ];
+      const paid = tenders.reduce((n, t) => n + paise(t.amount), 0) / 100;
+      return {
+        ...s,
+        tenders,
+        paid,
+        settlement: paymentSelection({ paid }, total),
+      };
+    });
+  const paymentInput = () => {
+    const input = draftSchema.parse({
       ...invoice,
       settlement,
-      ...(invoice.type === "Estimate" ? { paid: 0, settlement: "part" } : {}),
+      ...(advance ? { settlement: "full" } : {}),
     });
+    allocations(input);
+    return input;
+  };
   const reviewPayment = () => {
     E("");
     try {
@@ -261,7 +315,7 @@ export function InvoiceEditor() {
         data.drafts.find((d) => d.id === input.id),
       );
       // Submit exactly what the owner sees here, even if a background refresh occurs.
-      setReview({ ...input, confirmation });
+      setReview(finalizeSchema.parse({ ...input, confirmation }));
     } catch (e) {
       E(err(e));
     }
@@ -299,9 +353,12 @@ export function InvoiceEditor() {
           ? "Draft saved."
           : invoice.type === "Estimate"
             ? "Estimate saved."
-            : "Invoice finalized and stock posted.",
+            : advance
+              ? "Advance recorded on customer account."
+              : "Invoice finalized and stock posted.",
       );
-      nav(draft ? "/billing" : "/billing/" + invoice.id);
+      markSaved(document);
+      nav(draft ? "/billing" : "/billing/" + invoice.id, { replace: true });
     } catch (e) {
       E(err(e));
       setReview(null);
@@ -326,7 +383,11 @@ export function InvoiceEditor() {
         }
         subtitle="Build an itemised bill with your shop’s current metal rates."
       />
-      <div className="editor-grid">
+      <div
+        className="editor-grid"
+        data-unsaved={JSON.stringify(initial) !== JSON.stringify(invoice)}
+        data-saving={busy}
+      >
         <div className="stack">
           <section className="panel form-panel">
             <h2>
@@ -336,17 +397,55 @@ export function InvoiceEditor() {
               <Field label="Document type">
                 <Select
                   value={invoice.type}
-                  onChange={(e) =>
-                    change("type", e.target.value as InvoiceInput["type"])
-                  }
+                  onChange={(e) => {
+                    const type = e.target.value as InvoiceInput["type"];
+                    I(({ advanceFor, placeOfSupply, ...s }) => {
+                      if (type === "Estimate" || advance) {
+                        const { tenders, ...rest } = s;
+                        return {
+                          ...rest,
+                          type,
+                          paid: 0,
+                          settlement: "part",
+                          mode: s.mode === "Split" ? "Cash" : s.mode,
+                        };
+                      }
+                      return { ...s, type };
+                    });
+                    E("");
+                  }}
                 >
                   <option>Non-GST bill</option>
                   <option disabled={!data.profile.gstRegistered}>
                     GST invoice
                   </option>
-                  <option>Estimate</option>
+                  <option disabled={!!invoice.sourceEstimate}>Estimate</option>
+                  <option
+                    disabled={
+                      !!invoice.items.length || !!invoice.sourceEstimate
+                    }
+                  >
+                    Advance receipt
+                  </option>
                 </Select>
               </Field>
+              {invoice.type === "GST invoice" && (
+                <Field label="Place of supply (goods)">
+                  <Select
+                    value={invoice.placeOfSupply ?? ""}
+                    onChange={(e) => change("placeOfSupply", e.target.value)}
+                  >
+                    <option value="">Select actual state / UT</option>
+                    {Object.entries(supplyStates)
+                      .sort(([a], [b]) => a.localeCompare(b))
+                      .map(([code, name]) => (
+                        <option key={code} value={code}>
+                          {name} ({code})
+                        </option>
+                      ))}
+                  </Select>
+                </Field>
+              )}
               <Field label="Customer">
                 <Select
                   value={invoice.customerId}
@@ -362,130 +461,150 @@ export function InvoiceEditor() {
               </Field>
             </div>
           </section>
-          <section className="panel form-panel">
-            <div className="row-between">
-              <h2>
-                <span className="step-index">02</span>Jewellery items
-              </h2>
-              <span className="count-pill">{invoice.items.length} items</span>
-            </div>
-            {!invoice.items.length ? (
-              <div className="item-placeholder">
-                <ReceiptText size={25} />
-                <strong>Add your first item</strong>
-                <p>Choose a product from your inventory.</p>
+          {advance ? (
+            <section className="panel form-panel">
+              <h2>Customer deposit</h2>
+              <Field
+                label="Advance for"
+                hint="This credits the customer account. No sale, tax or stock movement is posted."
+              >
+                <input
+                  maxLength={240}
+                  value={invoice.advanceFor ?? ""}
+                  onChange={(e) => change("advanceFor", e.target.value)}
+                />
+              </Field>
+            </section>
+          ) : (
+            <section className="panel form-panel">
+              <div className="row-between">
+                <h2>
+                  <span className="step-index">02</span>Jewellery items
+                </h2>
+                <span className="count-pill">{invoice.items.length} items</span>
               </div>
-            ) : (
-              invoice.items.map((l, n) => {
-                const p = data.products.find((p) => p.id === l.productId);
-                return (
-                  <div className="bill-line" key={l.productId}>
-                    <div className="row-between">
-                      <div>
-                        <strong>{p?.name ?? "Missing product"}</strong>
-                        <small>
-                          {p?.metal} · {p?.purity} · {p?.gross} g gross
-                        </small>
+              {!invoice.items.length ? (
+                <div className="item-placeholder">
+                  <ReceiptText size={25} />
+                  <strong>Add your first item</strong>
+                  <p>Choose a product from your inventory.</p>
+                </div>
+              ) : (
+                invoice.items.map((l, n) => {
+                  const p = data.products.find((p) => p.id === l.productId);
+                  return (
+                    <div className="bill-line" key={l.productId}>
+                      <div className="row-between">
+                        <div>
+                          <strong>{p?.name ?? "Missing product"}</strong>
+                          <small>
+                            {p?.metal} · {p?.purity} · {p?.gross} g gross
+                          </small>
+                        </div>
+                        <button
+                          className="icon-btn"
+                          title="Remove item"
+                          aria-label={"Remove " + p?.name}
+                          onClick={() =>
+                            change(
+                              "items",
+                              invoice.items.filter((_, k) => k !== n),
+                            )
+                          }
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                      <div className="line-nums">
+                        <Field label="Qty">
+                          <input
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={l.quantity}
+                            onChange={(e) =>
+                              setLine(n, { quantity: +e.target.value })
+                            }
+                          />
+                        </Field>
+                        <div>
+                          <small>Applied rate / g</small>
+                          <strong>
+                            {cash(
+                              currentRates(data.rates).find(
+                                (r) =>
+                                  r.metal === p?.metal &&
+                                  r.purity === p?.purity,
+                              )?.rate ?? 0,
+                            )}
+                          </strong>
+                        </div>
+                        <div>
+                          <small>Line total</small>
+                          <strong>
+                            {rupee(preview.b?.lines[n]?.totalPaise ?? 0, 2)}
+                          </strong>
+                        </div>
                       </div>
                       <button
-                        className="icon-btn"
-                        title="Remove item"
-                        aria-label={"Remove " + p?.name}
-                        onClick={() =>
-                          change(
-                            "items",
-                            invoice.items.filter((_, k) => k !== n),
-                          )
-                        }
+                        className="text-link"
+                        onClick={() => X(expand === n ? -1 : n)}
                       >
-                        <Trash2 size={16} />
+                        {expand === n ? "Hide" : "Adjust"} making & charges
                       </button>
-                    </div>
-                    <div className="line-nums">
-                      <Field label="Qty">
-                        <input
-                          type="number"
-                          min="1"
-                          step="1"
-                          value={l.quantity}
-                          onChange={(e) =>
-                            setLine(n, { quantity: +e.target.value })
-                          }
-                        />
-                      </Field>
-                      <div>
-                        <small>Applied rate / g</small>
-                        <strong>
-                          {cash(
-                            currentRates(data.rates).find(
-                              (r) =>
-                                r.metal === p?.metal && r.purity === p?.purity,
-                            )?.rate ?? 0,
-                          )}
-                        </strong>
-                      </div>
-                      <div>
-                        <small>Line total</small>
-                        <strong>
-                          {rupee(preview.b?.lines[n]?.totalPaise ?? 0, 2)}
-                        </strong>
-                      </div>
-                    </div>
-                    <button
-                      className="text-link"
-                      onClick={() => X(expand === n ? -1 : n)}
-                    >
-                      {expand === n ? "Hide" : "Adjust"} making & charges
-                    </button>
-                    {expand === n && (
-                      <div className="form-grid charges">
-                        <Field label="Making calculation">
-                          <Select
-                            value={l.makingMode}
-                            onChange={(e) =>
-                              setLine(n, {
-                                makingMode: e.target
-                                  .value as LineInput["makingMode"],
-                              })
-                            }
-                          >
-                            <option>Fixed</option>
-                            <option>Per gram</option>
-                            <option>Percentage</option>
-                          </Select>
-                        </Field>
-                        {(
-                          [
-                            ["making", "Making amount / rate"],
-                            ["wastagePct", "Wastage %"],
-                            ["stoneValue", "Stone value / piece (₹)"],
-                            ["otherCharges", "Other charges / piece (₹)"],
-                            ["discount", "Line discount (₹)"],
-                          ] as const
-                        ).map(([k, t]) => (
-                          <Field key={k} label={t}>
-                            <input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              value={l[k]}
+                      {expand === n && (
+                        <div className="form-grid charges">
+                          <Field label="Making calculation">
+                            <Select
+                              value={l.makingMode}
                               onChange={(e) =>
-                                setLine(n, { [k]: +e.target.value })
+                                setLine(n, {
+                                  makingMode: e.target
+                                    .value as LineInput["makingMode"],
+                                })
                               }
-                            />
+                            >
+                              <option>Fixed</option>
+                              <option>Per gram</option>
+                              <option>Percentage</option>
+                            </Select>
                           </Field>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
-            <button className="btn outline full-btn" onClick={() => M("items")}>
-              <Plus size={16} />
-              Add product to bill
-            </button>
-          </section>
+                          {(
+                            [
+                              ["making", "Making amount / rate"],
+                              ["wastagePct", "Wastage %"],
+                              ["stoneValue", "Stone value / piece (₹)"],
+                              ["otherCharges", "Other charges / piece (₹)"],
+                              ["discount", "Line discount (₹)"],
+                            ] as const
+                          ).map(([k, t]) => (
+                            <Field key={k} label={t}>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={l[k]}
+                                onChange={(e) =>
+                                  setLine(n, { [k]: +e.target.value })
+                                }
+                              />
+                            </Field>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+              <button
+                className="btn outline full-btn"
+                onClick={() => M("items")}
+              >
+                <Plus size={16} />
+                Add product to bill
+              </button>
+            </section>
+          )}
         </div>
         <aside className="panel summary-card">
           <div className="section-kicker">
@@ -493,67 +612,77 @@ export function InvoiceEditor() {
             CHECKOUT
           </div>
           <h2>Invoice summary</h2>
-          <dl className="summary-lines">
-            <dt>Metal value</dt>
-            <dd>
-              {rupee(
-                preview.b?.lines.reduce((s, l) => s + l.metalPaise, 0) ?? 0,
-                2,
+          {!advance && (
+            <dl className="summary-lines">
+              <dt>Metal value</dt>
+              <dd>
+                {rupee(
+                  preview.b?.lines.reduce((s, l) => s + l.metalPaise, 0) ?? 0,
+                  2,
+                )}
+              </dd>
+              <dt>Making & other charges</dt>
+              <dd>
+                {rupee(
+                  preview.b?.lines.reduce(
+                    (s, l) =>
+                      s +
+                      l.makingPaise +
+                      l.otherPaise +
+                      l.stonePaise +
+                      l.wastagePaise,
+                    0,
+                  ) ?? 0,
+                  2,
+                )}
+              </dd>
+              <dt>Discount</dt>
+              <dd>
+                {rupee(
+                  preview.b?.lines.reduce((s, l) => s + l.discountPaise, 0) ??
+                    0,
+                  2,
+                )}
+              </dd>
+              {invoice.type === "GST invoice" && (
+                <>
+                  <dt>GST</dt>
+                  <dd>{rupee(preview.b?.taxPaise ?? 0, 2)}</dd>
+                </>
               )}
-            </dd>
-            <dt>Making & other charges</dt>
-            <dd>
-              {rupee(
-                preview.b?.lines.reduce(
-                  (s, l) =>
-                    s +
-                    l.makingPaise +
-                    l.otherPaise +
-                    l.stonePaise +
-                    l.wastagePaise,
-                  0,
-                ) ?? 0,
-                2,
-              )}
-            </dd>
-            <dt>Discount</dt>
-            <dd>
-              {rupee(
-                preview.b?.lines.reduce((s, l) => s + l.discountPaise, 0) ?? 0,
-                2,
-              )}
-            </dd>
-            <dt>GST</dt>
-            <dd>{rupee(preview.b?.taxPaise ?? 0, 2)}</dd>
-            <dt>Round off</dt>
-            <dd>{rupee(preview.b?.roundOffPaise ?? 0, 2)}</dd>
-          </dl>
+              <dt>Round off</dt>
+              <dd>{rupee(preview.b?.roundOffPaise ?? 0, 2)}</dd>
+            </dl>
+          )}
           <div className="grand-total">
             <small>Grand total</small>
             <strong>{rupee(total, 2)}</strong>
           </div>
           {invoice.type !== "Estimate" && (
             <div className="stack compact-stack">
-              <Field label="Payment">
-                <Select
-                  value={settlement}
-                  onChange={(e) =>
-                    e.target.value === "full"
-                      ? setPayment(total / 100, "full")
-                      : setPayment(invoice.paid, "part")
-                  }
-                >
-                  <option value="full" disabled={!preview.b || total === 0}>
-                    Paid in full
-                  </option>
-                  <option value="part">Partial payment / credit</option>
-                </Select>
-              </Field>
+              {!advance && invoice.mode !== "Split" && (
+                <Field label="Payment">
+                  <Select
+                    value={settlement}
+                    onChange={(e) =>
+                      e.target.value === "full"
+                        ? setPayment(total / 100, "full")
+                        : setPayment(invoice.paid, "part")
+                    }
+                  >
+                    <option value="full" disabled={!preview.b || total === 0}>
+                      Paid in full
+                    </option>
+                    <option value="part">Partial payment / credit</option>
+                  </Select>
+                </Field>
+              )}
               <Field label="Amount received (₹)">
                 <input
                   type="number"
                   min="0"
                   step="0.01"
+                  readOnly={invoice.mode === "Split"}
                   value={invoice.paid}
                   onChange={(e) => {
                     const paid = Number(e.target.value);
@@ -565,14 +694,32 @@ export function InvoiceEditor() {
                 <Select
                   value={invoice.mode}
                   onChange={(e) =>
-                    change("mode", e.target.value as InvoiceInput["mode"])
+                    switchMode(e.target.value as InvoiceInput["mode"])
                   }
                 >
-                  {["Cash", "UPI", "Card", "Bank", "Other"].map((x) => (
+                  {[...tenderModes, "Split"].map((x) => (
                     <option key={x}>{x}</option>
                   ))}
                 </Select>
               </Field>
+              {invoice.mode === "Split" && (
+                <div className="form-grid">
+                  {tenderModes.map((mode) => (
+                    <Field key={mode} label={`${mode} received (₹)`}>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={
+                          invoice.tenders?.find((t) => t.mode === mode)
+                            ?.amount ?? ""
+                        }
+                        onChange={(e) => split(mode, +e.target.value)}
+                      />
+                    </Field>
+                  ))}
+                </div>
+              )}
               <div className="row-between">
                 <small>Balance due</small>
                 <strong>{rupee(total - paise(invoice.paid), 2)}</strong>
@@ -586,11 +733,15 @@ export function InvoiceEditor() {
             onClick={reviewPayment}
           >
             <Check size={16} />
-            {invoice.type === "Estimate" ? "Save estimate" : "Finalize invoice"}
+            {invoice.type === "Estimate"
+              ? "Save estimate"
+              : advance
+                ? "Record advance"
+                : "Finalize invoice"}
           </button>
           <button
             className="btn outline full-btn"
-            disabled={busy || !invoice.items.length}
+            disabled={busy || (advance ? !invoice.paid : !invoice.items.length)}
             onClick={() => save(true)}
           >
             <Save size={15} />
@@ -654,7 +805,9 @@ export function InvoiceEditor() {
         title={
           invoice.type === "Estimate"
             ? "Save this estimate?"
-            : "Finalize this invoice?"
+            : advance
+              ? "Record this advance?"
+              : "Finalize this invoice?"
         }
       >
         {review && (
@@ -665,7 +818,13 @@ export function InvoiceEditor() {
             <p className="muted">
               {review.type === "Estimate"
                 ? "Estimates do not move stock or record payments."
-                : `Received · ${review.mode}: ${cash(review.paid, 2)}. Outstanding: ${rupee(review.confirmation.balancePaise, 2)}. Changes require a reversal.`}
+                : review.mode === "Split"
+                  ? `${allocations(review)
+                      .map((t) => `${t.mode}: ${rupee(t.amountPaise, 2)}`)
+                      .join(
+                        " + ",
+                      )}. Total received: ${cash(review.paid, 2)}. Outstanding: ${rupee(review.confirmation.balancePaise, 2)}.`
+                  : `Received · ${review.mode}: ${cash(review.paid, 2)}. Outstanding: ${rupee(review.confirmation.balancePaise, 2)}. Changes require a reversal.`}
             </p>
           </>
         )}
@@ -693,6 +852,8 @@ export function InvoiceDetail() {
   const { id } = useParams(),
     { data, demo, perform } = useShop(),
     b = data.invoices.find((x) => x.id === id),
+    [params] = useSearchParams(),
+    note = params.has("credit") ? b?.creditNote : undefined,
     notify = useToast();
   const [voiding, V] = useState(false),
     [reason, R] = useState(""),
@@ -708,7 +869,9 @@ export function InvoiceDetail() {
       </Empty>
     );
   const share = async () => {
-    const text = `${demo ? "SAMPLE · " : ""}${b.shop.shopName} · ${b.number}\n${day(b.issuedAt)}\nTotal ${rupee(b.totalPaise, 2)} · Balance ${rupee(b.balancePaise, 2)}`;
+    const text = note
+      ? `${note.shop.shopName} · Credit note ${note.number} against ${b.number} · ${rupee(b.totalPaise, 2)}`
+      : `${demo ? "SAMPLE · " : ""}${b.shop.shopName} · ${b.number}\n${day(b.issuedAt)}\nTotal ${rupee(b.totalPaise, 2)} · Balance ${rupee(b.balancePaise, 2)}`;
     try {
       if ((await shareSummary(b.number, text)) === "copied")
         notify("Invoice summary copied for sharing.");
@@ -724,128 +887,34 @@ export function InvoiceDetail() {
       </Link>
       <PageHead
         eyebrow="DOCUMENT DETAILS"
-        title={b.number}
+        title={note?.number ?? b.number}
         subtitle="A snapshot of the rates, charges and branding at the time of issue."
       >
         <button className="btn outline" onClick={share}>
           <Share2 size={15} />
-          Share
+          Share summary
         </button>
         <button
           className="btn primary"
-          onClick={() => printDocument().catch((e) => E(err(e)))}
+          onClick={() =>
+            printDocument((note?.shop ?? b.shop).format).catch((e) => E(err(e)))
+          }
         >
           <Printer size={16} />
           Print / PDF
         </button>
       </PageHead>
       <Problem message={error} />
-      <style>{`@media print {@page { size: ${["A4", "A5"].includes(b.shop.format) ? b.shop.format : "auto"}; margin: ${b.shop.format.includes("mm") ? "2mm" : "10mm"}; }}`}</style>
-      <article
-        className={"receipt " + (b.shop.format.includes("mm") ? "thermal" : "")}
-        style={
-          {
-            "--paper-width": b.shop.format.includes("mm")
-              ? b.shop.format
-              : "100%",
-          } as React.CSSProperties
-        }
-      >
-        <div className="receipt-brand">
-          <span className="receipt-logo">
-            {b.shop.logo ? (
-              <img src={b.shop.logo} alt="Shop logo" />
-            ) : (
-              <GemMark size={34} />
-            )}
-          </span>
-          <div>
-            <h2>{b.shop.shopName}</h2>
-            <p>{b.shop.address}</p>
-            <small>
-              {[
-                b.shop.mobile,
-                b.shop.email,
-                b.shop.gstin && "GSTIN " + b.shop.gstin,
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </small>
-          </div>
-        </div>
-        <div className="receipt-info">
-          <div>
-            <small>BILLED TO</small>
-            <h3>{b.customer?.name ?? "Walk-in customer"}</h3>
-            <p>
-              {[b.customer?.phone, b.customer?.address, b.customer?.gstin]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
-          </div>
-          <div>
-            <small>{b.type.toUpperCase()}</small>
-            <strong>{b.number}</strong>
-            <p>{day(b.issuedAt)}</p>
-            <Status text={paymentStatus(b)} />
-          </div>
-        </div>
-        <div className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Item / purity</th>
-                <th>Qty</th>
-                <th>Net wt.</th>
-                <th>Rate/g</th>
-                <th className="right">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {b.lines.map((l) => (
-                <tr key={l.productId}>
-                  <td>
-                    <strong>{l.name}</strong>
-                    <small>
-                      {l.metal} · {l.purity}
-                      {l.hsn && ` · HSN ${l.hsn}`} · GST {l.taxPercent}%
-                    </small>
-                  </td>
-                  <td>{l.quantity}</td>
-                  <td>{l.net} g</td>
-                  <td>{cash(l.rate, 2)}</td>
-                  <td className="right">{rupee(l.totalPaise, 2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <dl className="receipt-totals">
-          {[
-            ["Taxable / subtotal", b.subtotalPaise],
-            ["GST", b.taxPaise],
-            ["Round off", b.roundOffPaise],
-            ["Grand total", b.totalPaise],
-            ["Received · " + b.mode, b.paidPaise],
-            ["Balance", b.balancePaise],
-          ].map(([t, v]) => (
-            <div key={t} className={t === "Grand total" ? "total" : ""}>
-              <dt>{t}</dt>
-              <dd>{rupee(Number(v), 2)}</dd>
-            </div>
-          ))}
-        </dl>
-        <div className="receipt-foot">
-          <span>
-            {demo
-              ? "SAMPLE · NOT A TAX DOCUMENT"
-              : "Thank you for your business."}
-          </span>
-          <span>Authorised signature</span>
-        </div>
-        {b.voidedAt && <p className="problem">VOIDED · {day(b.voidedAt)}</p>}
-      </article>
+      <InvoiceReceipt bill={b} sample={demo} credit={!!note} />
       <div className="document-actions">
+        {b.creditNote && (
+          <Link
+            className="btn primary"
+            to={"/billing/" + b.id + (note ? "" : "?credit=1")}
+          >
+            {note ? "View original bill" : "View credit note"}
+          </Link>
+        )}
         <Link className="btn outline" to={"/billing/new?duplicate=" + b.id}>
           <Copy size={15} />
           Duplicate
@@ -871,6 +940,8 @@ export function InvoiceDetail() {
         <p className="muted">
           The original document is retained. Stock, payments and receivables are
           reversed together.
+          {isSale(b) &&
+            " A full credit note will reference this bill. Confirm only after arranging any repayment using the original tender(s)."}
         </p>
         <form
           onSubmit={async (e) => {

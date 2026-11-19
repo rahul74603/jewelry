@@ -46,6 +46,10 @@ export const profileSchema = z
       ),
     gstRegistered: z.boolean(),
     taxes: z.array(taxRule).max(60),
+    invoiceFooter: z.string().trim().max(240).optional(),
+    invoiceTerms: z.string().trim().max(1000).optional(),
+    exchangePolicy: z.string().trim().max(600).optional(),
+    showOwner: z.boolean().optional(),
     roundOff: z.boolean(),
     format: z.enum(["A4", "A5", "80mm", "58mm"]),
     language: z.enum(["en", "hi"]),
@@ -135,21 +139,47 @@ export const lineSchema = z.object({
   discount: money,
 });
 export type LineInput = z.infer<typeof lineSchema>;
+export const tenderModes = ["Cash", "UPI", "Bank", "Card", "Other"] as const;
+export type TenderMode = (typeof tenderModes)[number];
 export const invoiceSchema = z.object({
   id,
   customerId: z.union([id, z.literal("")]),
-  type: z.enum(["Non-GST bill", "GST invoice", "Estimate"]),
-  items: z.array(lineSchema).min(1, "Add at least one item").max(40),
+  type: z.enum(["Non-GST bill", "GST invoice", "Estimate", "Advance receipt"]),
+  items: z.array(lineSchema).max(40),
   paid: money,
   // Older stored drafts/invoice snapshots have an amount and mode, but no selection.
   settlement: z.enum(["part", "full"]).optional(),
-  mode: z.enum(["Cash", "UPI", "Card", "Bank", "Other"]),
+  mode: z.enum([...tenderModes, "Split"]),
+  tenders: z
+    .array(z.object({ mode: z.enum(tenderModes), amount: money.positive() }))
+    .min(2)
+    .max(5)
+    .optional(),
+  placeOfSupply: z
+    .string()
+    .regex(/^\d{2}$/)
+    .optional(),
+  advanceFor: z.string().trim().min(1).max(240).optional(),
   sourceEstimate: id.optional(),
 });
 export type InvoiceInput = z.infer<typeof invoiceSchema>;
 // New writes require an explicit intent. Never default a missing or zero payment to full.
 export const draftSchema = invoiceSchema
   .required({ settlement: true })
+  .refine(
+    (i) =>
+      i.type === "Advance receipt"
+        ? i.items.length === 0 &&
+          !!i.customerId &&
+          !!i.advanceFor &&
+          i.paid > 0 &&
+          !i.sourceEstimate
+        : i.items.length > 0,
+    {
+      message:
+        "A sale needs items; an advance needs a customer, purpose and positive deposit, without stock.",
+    },
+  )
   .refine((i) => i.settlement !== "full" || i.paid > 0, {
     path: ["paid"],
     message: "Full payment requires a positive received amount.",
@@ -159,12 +189,18 @@ export const draftSchema = invoiceSchema
     message: "Estimates cannot record a payment.",
   });
 const nonnegativePaise = z.number().int().nonnegative();
-export const finalizeSchema = draftSchema.safeExtend({
-  confirmation: z.object({
-    totalPaise: nonnegativePaise,
-    balancePaise: nonnegativePaise,
-  }),
+export const confirmationSchema = z.object({
+  totalPaise: nonnegativePaise,
+  balancePaise: nonnegativePaise,
 });
+export const finalizeSchema = draftSchema
+  .safeExtend({
+    confirmation: confirmationSchema,
+  })
+  .refine((i) => i.type !== "GST invoice" || !!i.placeOfSupply, {
+    path: ["placeOfSupply"],
+    message: "Select the actual place of supply for GST.",
+  });
 export type FinalizeInput = z.infer<typeof finalizeSchema>;
 export type BillLine = LineInput & {
   name: string;
@@ -185,6 +221,7 @@ export type BillLine = LineInput & {
   otherPaise: number;
   discountPaise: number;
   taxablePaise: number;
+  components?: Partial<Record<"CGST" | "SGST" | "UTGST" | "IGST", number>>;
   taxPercent: number;
   taxPaise: number;
   totalPaise: number;
@@ -207,6 +244,14 @@ export type Invoice = {
   input: InvoiceInput;
   voidedAt?: string;
   convertedTo?: string;
+  authorizedMark?: { artwork: string; reference: string };
+  previousBalancePaise?: number;
+  creditNote?: {
+    number: string;
+    issuedAt: string;
+    reason: string;
+    shop: Profile;
+  };
 };
 export type Draft = InvoiceInput & { updatedAt: string };
 export type Workspace = {

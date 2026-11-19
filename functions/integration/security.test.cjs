@@ -550,3 +550,85 @@ test("Live browser: an existing zero-received draft stays credit through save, r
     [500000],
   );
 });
+
+test("Split receipt, advance and credit note use the original tenant transaction exactly once", async () => {
+  const { t, send } = await paymentDesk();
+  const deposit = {
+    ...paymentDraft(300),
+    id: "deposit",
+    type: "Advance receipt",
+    advanceFor: "Ring order",
+    items: [],
+    confirmation: { totalPaise: 30000, balancePaise: 0 },
+  };
+  await send("invoice", deposit);
+  const bill = {
+    ...confirmPayment(paymentDraft(2000)),
+    mode: "Split",
+    tenders: [
+      { mode: "Cash", amount: 500 },
+      { mode: "UPI", amount: 1500 },
+    ],
+  };
+  await send("draft", bill);
+  await assert.rejects(
+    send("invoice", {
+      ...bill,
+      tenders: [
+        { mode: "Cash", amount: 1500 },
+        { mode: "UPI", amount: 500 },
+      ],
+    }),
+    /saved draft/,
+  );
+  await Promise.all([send("invoice", bill), send("invoice", bill)]);
+  const [b] = (await send("workspace")).workspace.invoices.filter(
+    (b) => b.id === bill.id,
+  );
+  assert.equal(b.previousBalancePaise, -30000);
+  assert.equal(b.balancePaise, 300000);
+  assert.equal(
+    (await t.collection("products").doc("ring").get()).get("stock"),
+    7,
+  );
+  const payment = (
+    await t
+      .collection("payments")
+      .doc("sale_" + b.id)
+      .get()
+  ).data();
+  assert.deepEqual(payment.allocations, [
+    { mode: "Cash", amountPaise: 50000 },
+    { mode: "UPI", amountPaise: 150000 },
+  ]);
+  assert.equal(payment.amountPaise, 200000);
+  await Promise.all([
+    send("void", { id: b.id, reason: "Complete return" }),
+    send("void", { id: b.id, reason: "Complete return" }),
+  ]);
+  const note = (await send("workspace")).workspace.invoices.find(
+    (x) => x.id === b.id,
+  ).creditNote;
+  assert.equal(note.reason, "Complete return");
+  assert.equal(
+    (await t.collection("counters").doc("credits").get()).get("value"),
+    1,
+  );
+  const payments = (await t.collection("payments").get()).docs;
+  assert.equal(payments.length, 3);
+  assert.equal(
+    payments.reduce((s, d) => s + d.get("amountPaise"), 0),
+    30000,
+  );
+  assert.equal(
+    (await t.collection("customerLedger").get()).docs.reduce(
+      (s, d) => s + d.get("deltaPaise"),
+      0,
+    ),
+    -30000,
+  );
+  assert.equal(
+    (await t.collection("products").doc("ring").get()).get("stock"),
+    8,
+  );
+});

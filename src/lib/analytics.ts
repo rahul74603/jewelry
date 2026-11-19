@@ -1,7 +1,9 @@
 import { indiaDay, saleInvoices } from "../../functions/src/core/billing";
+import { accountDocuments } from "../../functions/src/core/documents";
 import type { Workspace } from "../../functions/src/core/model";
 export function series(data: Workspace, n: number, offset = 0) {
   const invoices = saleInvoices(data);
+  const receipts = accountDocuments(data);
   return Array.from({ length: n }, (_, i) => {
     const date = Date.now() - (n - 1 - i + offset) * 86400000;
     const sales = invoices.filter(
@@ -10,7 +12,9 @@ export function series(data: Workspace, n: number, offset = 0) {
     return {
       date,
       sales: sales.reduce((v, b) => v + b.totalPaise, 0),
-      paid: sales.reduce((v, b) => v + b.paidPaise, 0),
+      paid: receipts
+        .filter((b) => indiaDay(b.issuedAt) === indiaDay(date))
+        .reduce((v, b) => v + b.paidPaise, 0),
       count: sales.length,
     };
   });

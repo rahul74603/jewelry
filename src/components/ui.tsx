@@ -1,3 +1,5 @@
+import { useRef } from "react";
+import { useDismissGuard } from "../lib/navigation";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
   ChevronDown,
@@ -81,6 +83,7 @@ export function Modal({
   description,
   children,
   wide = false,
+  routePanel = false,
   className = "",
 }: {
   open: boolean;
@@ -89,13 +92,21 @@ export function Modal({
   description?: string;
   children: ReactNode;
   wide?: boolean;
+  routePanel?: boolean;
   className?: string;
 }) {
+  const scope = useRef<HTMLDivElement>(null),
+    guard = useDismissGuard();
   return (
-    <Dialog.Root open={open} onOpenChange={(v) => !v && onClose()}>
+    <Dialog.Root
+      open={open}
+      onOpenChange={(v) => !v && guard(scope.current, onClose)}
+    >
       <Dialog.Portal>
         <Dialog.Overlay className="overlay" />
         <Dialog.Content
+          ref={scope}
+          data-route-panel={routePanel ? "" : undefined}
           className={`modal ${wide ? "wide" : ""} ${className}`}
           {...(description ? {} : { "aria-describedby": undefined })}
         >

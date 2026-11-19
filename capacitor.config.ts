@@ -4,6 +4,6 @@ const config: CapacitorConfig = {
   appName: "Aurum Workspace",
   webDir: "dist",
   server: { androidScheme: "https" },
-  android: { allowMixedContent: false },
+  android: { allowMixedContent: false, zoomEnabled: true },
 };
 export default config;

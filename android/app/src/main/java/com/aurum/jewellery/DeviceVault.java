@@ -41,7 +41,7 @@ public class DeviceVault extends Plugin {
         getActivity().runOnUiThread(() -> { try {
             PrintManager manager = (PrintManager)getActivity().getSystemService(Context.PRINT_SERVICE);
             String job = "Aurum invoice";
-            manager.print(job, getBridge().getWebView().createPrintDocumentAdapter(job), null);
+            manager.print(job, getBridge().getWebView().createPrintDocumentAdapter(job), InvoicePaper.forFormat(call.getString("format", "")));
             call.resolve();
         } catch (Exception e) { call.reject("Android print service unavailable"); } });
     }

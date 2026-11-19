@@ -235,7 +235,14 @@ export function Shell() {
             </button>
           </div>
         </header>
-        <main className="content">
+        <main
+          className="content"
+          data-setup-required={!p.setupComplete}
+          lang={p.language}
+          data-shop-home={
+            loc.pathname === "/" && p.setupComplete ? "" : undefined
+          }
+        >
           {!demo && !p.setupComplete && loc.pathname !== "/settings" ? (
             <Navigate to="/settings?setup=1" replace />
           ) : (
@@ -244,7 +251,7 @@ export function Shell() {
               <Route path="/billing" element={<Invoices />} />
               <Route
                 path="/billing/new"
-                element={<InvoiceEditor key={loc.key} />}
+                element={<InvoiceEditor key={loc.pathname + loc.search} />}
               />
               <Route path="/billing/:id" element={<InvoiceDetail />} />
               <Route path="/inventory" element={<Inventory />} />

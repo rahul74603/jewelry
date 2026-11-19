@@ -1,3 +1,7 @@
+import {
+  accountDelta,
+  accountDocuments,
+} from "../../functions/src/core/documents";
 import { useState, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -272,8 +276,18 @@ export default function Dashboard() {
     paid = rows.reduce((s, r) => s + r.paid, 0),
     count = rows.reduce((s, r) => s + r.count, 0);
   const invoices = saleInvoices(data);
-  const outstanding = invoices.reduce((s, i) => s + i.balancePaise, 0),
-    dueCount = invoices.filter((i) => i.balancePaise > 0).length,
+  const accounts = new Map<string, number>();
+  for (const b of accountDocuments(data))
+    if (b.customer)
+      accounts.set(
+        b.customer.id,
+        (accounts.get(b.customer.id) ?? 0) + accountDelta(b),
+      );
+  const outstanding = [...accounts.values()].reduce(
+      (s, n) => s + Math.max(n, 0),
+      0,
+    ),
+    dueCount = [...accounts.values()].filter((n) => n > 0).length,
     stock = data.products.reduce((s, p) => s + p.stock, 0);
   const rates = currentRates(data.rates)
     .sort((a, b) => {
@@ -314,7 +328,7 @@ export default function Dashboard() {
       value: rupee(outstanding),
       icon: Hourglass,
       color: "peach",
-      note: `${dueCount} outstanding invoices`,
+      note: `${dueCount} accounts with dues`,
       hint: "Dues",
       up: null,
     },

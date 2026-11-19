@@ -1,3 +1,4 @@
+import type { Profile } from "../../functions/src/core/model";
 import { Capacitor, registerPlugin } from "@capacitor/core";
 const native = Capacitor.getPlatform() === "android";
 const vault = registerPlugin<{
@@ -6,7 +7,7 @@ const vault = registerPlugin<{
     slot: string;
     message: string;
   }) => Promise<{ signature: string }>;
-  printInvoice: () => Promise<void>;
+  printInvoice: (options: { format: Profile["format"] }) => Promise<void>;
   shareText: (v: { text: string }) => Promise<void>;
 }>("DeviceVault");
 const b64 = (b: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Array(b)));
@@ -74,8 +75,14 @@ export async function deviceIdentity(uid: string) {
           ),
   };
 }
-export async function printDocument() {
-  if (native) await vault.printInvoice();
+export async function printDocument(format: Profile["format"]) {
+  await document.fonts.ready;
+  await Promise.all(
+    Array.from(document.querySelectorAll<HTMLImageElement>(".receipt img")).map(
+      (img) => img.decode(),
+    ),
+  );
+  if (native) await vault.printInvoice({ format });
   else window.print();
 }
 

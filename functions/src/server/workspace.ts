@@ -1,3 +1,4 @@
+import { approvedMark } from "../core/authorization";
 import { z } from "zod";
 import {
   type Action,
@@ -16,6 +17,7 @@ import {
   invoiceSchema,
   draftSchema,
   finalizeSchema,
+  confirmationSchema,
 } from "../core/model";
 import {
   assertDraftPayment,
@@ -23,6 +25,7 @@ import {
   calculateInvoice,
   postings,
 } from "../core/billing";
+import { allocations, documentNumber, isSale } from "../core/documents";
 import { digest } from "./common";
 const amountCap = 2000;
 async function rows<T>(
@@ -73,10 +76,14 @@ export async function shopAction(
       rows<Rate>(tx, t, "metalRates"),
       rows<Invoice>(tx, t, "invoices"),
       rows<Draft>(tx, t, "drafts"),
-      rows<{ id: string; at: string }>(tx, t, "reversals"),
+      rows<{ id: string; at: string; creditNote?: Invoice["creditNote"] }>(
+        tx,
+        t,
+        "reversals",
+      ),
       rows<{ id: string; invoiceId: string }>(tx, t, "conversions"),
     ]);
-    const v = new Map(voids.map((x) => [x.id, x.at])),
+    const v = new Map(voids.map((x) => [x.id, x])),
       c = new Map(conversions.map((x) => [x.id, x.invoiceId]));
     return {
       profile: profile.data(),
@@ -86,7 +93,14 @@ export async function shopAction(
       drafts,
       invoices: invoices.map((b) => ({
         ...b,
-        ...(v.has(b.id) ? { voidedAt: v.get(b.id) } : {}),
+        ...(v.has(b.id)
+          ? {
+              voidedAt: v.get(b.id)!.at,
+              ...(v.get(b.id)!.creditNote
+                ? { creditNote: v.get(b.id)!.creditNote }
+                : {}),
+            }
+          : {}),
         ...(c.has(b.id) ? { convertedTo: c.get(b.id) } : {}),
       })),
     };
@@ -137,6 +151,7 @@ export async function shopAction(
   }
   if (action === "draft") {
     const d = draftSchema.parse(raw);
+    allocations(d);
     if ((await tx.get(record("invoices", d.id))).exists)
       throw Error("This invoice has already been finalized.");
     tx.set(record("drafts", d.id), { ...d, updatedAt: date });
@@ -161,14 +176,20 @@ export async function shopAction(
         if (previous.input.settlement !== undefined)
           assertReviewedPayment(
             previous,
-            finalizeSchema.parse(raw).confirmation,
+            confirmationSchema.parse(
+              (raw as { confirmation: unknown }).confirmation,
+            ),
           );
         return { id: key, number: previous.number };
       }
       const { confirmation } = finalizeSchema.parse(raw);
       const countRef = record(
         "counters",
-        input.type === "Estimate" ? "estimates" : "invoices",
+        input.type === "Estimate"
+          ? "estimates"
+          : input.type === "Advance receipt"
+            ? "advances"
+            : "invoices",
       );
       const [draft, profile, counter, contact, rates, stock] =
         await Promise.all([
@@ -197,7 +218,7 @@ export async function shopAction(
       products = stock.filter((s) => s.exists).map((s) => s.data() as Product);
       const p = profile.data() as Profile;
       const seq = (counter.get("value") ?? 0) + 1;
-      const number = `${input.type === "Estimate" ? "EST" : p.prefix}-${String(seq).padStart(5, "0")}`;
+      const number = documentNumber(p, input.type, seq);
       b = calculateInvoice(
         {
           products,
@@ -209,8 +230,27 @@ export async function shopAction(
         date,
         number,
       );
+      if (isSale(b)) {
+        const mark = approvedMark(
+          (await tx.get(record("settings", "hallmarkAuthorization"))).data(),
+          b.type,
+          at,
+        );
+        if (mark) b.authorizedMark = mark;
+      }
       assertReviewedPayment(b, confirmation);
       assertDraftPayment(input, draft.data() as Draft | undefined);
+      if (b.customer && b.type !== "Estimate") {
+        const prior = await tx.get(
+          t
+            .collection("customerLedger")
+            .where("customerId", "==", b.customer.id),
+        );
+        b.previousBalancePaise = prior.docs.reduce(
+          (sum, d) => sum + d.get("deltaPaise"),
+          0,
+        );
+      }
       if (input.sourceEstimate)
         tx.create(record("conversions", input.sourceEstimate), {
           id: input.sourceEstimate,
@@ -231,7 +271,29 @@ export async function shopAction(
           b.lines.map((i) => tx.get(record("products", i.productId))),
         )
       ).map((d) => d.data() as Product);
+      let creditNote: Invoice["creditNote"];
+      if (isSale(b)) {
+        const counter = record("counters", "credits");
+        const [count, profile] = await Promise.all([
+          tx.get(counter),
+          tx.get(profileRef),
+        ]);
+        const seq = (count.get("value") ?? 0) + 1;
+        const shop = profile.data() as Profile;
+        creditNote = {
+          number: documentNumber(shop, "Credit note", seq),
+          issuedAt: date,
+          reason: (raw as { reason: string }).reason.trim(),
+          shop: {
+            ...shop,
+            gstin: b.shop.gstin,
+            gstRegistered: b.shop.gstRegistered,
+          },
+        };
+        tx.set(counter, { value: seq });
+      }
       tx.create(record("reversals", key), {
+        ...(creditNote ? { creditNote } : {}),
         id: key,
         at: date,
         reason: (raw as { reason: string }).reason,
@@ -254,6 +316,14 @@ export async function shopAction(
         at,
         invoiceId: key,
         amountPaise: entry.received,
+        ...(b.mode === "Split"
+          ? {
+              allocations: allocations(b.input).map((p) => ({
+                ...p,
+                amountPaise: p.amountPaise * (input ? 1 : -1),
+              })),
+            }
+          : {}),
         mode: b.mode,
         customerId: b.customer?.id ?? "",
       });

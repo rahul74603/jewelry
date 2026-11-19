@@ -1,3 +1,9 @@
+import {
+  accountDocuments,
+  isSale,
+  accountDelta,
+} from "../../functions/src/core/documents";
+import { useClosePanel, markSaved } from "../lib/navigation";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
@@ -93,6 +99,7 @@ function ProductForm({ close }: { close: () => void }) {
         try {
           await perform("product", v);
           notify("Product added to inventory.");
+          markSaved(document.querySelector("[role=dialog]"));
           close();
         } catch (e) {
           E(err(e));
@@ -260,6 +267,7 @@ function ProductDetail({ product: p }: { product: Product }) {
   );
 }
 export function Inventory() {
+  const closePanel = useClosePanel();
   const { data } = useShop(),
     [params, P] = useSearchParams(),
     [metal, M] = useState("All metals");
@@ -375,12 +383,18 @@ export function Inventory() {
         open={params.has("new")}
         title="Add a product"
         description="Weights and costs are per piece. Opening stock is recorded separately."
-        onClose={() => P({})}
+        routePanel
+        onClose={closePanel}
         wide
       >
-        <ProductForm close={() => P({})} />
+        <ProductForm close={closePanel} />
       </Modal>
-      <Modal open={!!chosen} title="Product details" onClose={() => P({})}>
+      <Modal
+        open={!!chosen}
+        title="Product details"
+        routePanel
+        onClose={closePanel}
+      >
         {chosen && <ProductDetail product={chosen} />}
       </Modal>
     </>
@@ -411,6 +425,7 @@ function CustomerForm({ close }: { close: () => void }) {
         try {
           await perform("customer", v);
           notify("Customer added.");
+          markSaved(document.querySelector("[role=dialog]"));
           close();
         } catch (e) {
           E(err(e));
@@ -444,18 +459,19 @@ function CustomerForm({ close }: { close: () => void }) {
   );
 }
 export function Customers() {
+  const closePanel = useClosePanel();
   const { data } = useShop(),
     [params, P] = useSearchParams();
   const selected = data.customers.find((c) => c.id === params.get("item")),
-    bills = saleInvoices(data);
+    bills = accountDocuments(data);
   const totals = (id: string) =>
     bills
       .filter((b) => b.customer?.id === id)
       .reduce(
         (s, b) => ({
-          sales: s.sales + b.totalPaise,
+          sales: s.sales + (isSale(b) ? b.totalPaise : 0),
           paid: s.paid + b.paidPaise,
-          due: s.due + b.balancePaise,
+          due: s.due + accountDelta(b),
         }),
         { sales: 0, paid: 0, due: 0 },
       );
@@ -510,11 +526,17 @@ export function Customers() {
         open={params.has("new")}
         title="Add customer"
         description="Only the name is required. Contact and tax details are optional."
-        onClose={() => P({})}
+        routePanel
+        onClose={closePanel}
       >
-        <CustomerForm close={() => P({})} />
+        <CustomerForm close={closePanel} />
       </Modal>
-      <Modal open={!!selected} title="Customer profile" onClose={() => P({})}>
+      <Modal
+        open={!!selected}
+        title="Customer profile"
+        routePanel
+        onClose={closePanel}
+      >
         {selected && (
           <>
             <div className="identity-row">
@@ -567,6 +589,7 @@ export function Customers() {
   );
 }
 export function MetalRates() {
+  const closePanel = useClosePanel();
   const { data, perform } = useShop(),
     notify = useToast(),
     [params, P] = useSearchParams(),
@@ -587,7 +610,8 @@ export function MetalRates() {
       });
       await perform("rate", v);
       notify("Effective metal rate recorded.");
-      P({});
+      markSaved(document.querySelector("[role=dialog]"));
+      closePanel();
     } catch (e) {
       E(err(e));
     } finally {
@@ -678,7 +702,8 @@ export function MetalRates() {
         open={params.has("new")}
         title="Record metal rate"
         description="Enter your own shop rate. This is not an exchange price feed."
-        onClose={() => P({})}
+        routePanel
+        onClose={closePanel}
       >
         <form onSubmit={add}>
           <div className="form-grid">
