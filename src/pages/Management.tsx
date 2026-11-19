@@ -36,6 +36,21 @@ import {
 } from "../components/ui";
 import { markSaved } from "../lib/navigation";
 import {
+  createBackup,
+  parseBackup,
+  shareBackupFile,
+  downloadBackupFile,
+  loadLastBackupAt,
+  loadBackupHistory,
+  loadBackupPreferences,
+  saveBackupPreferences,
+  markBackupDone,
+  type BackupFile,
+  type BackupHistoryEntry,
+  type BackupPreferences,
+  type BackupDestination,
+} from "../lib/backup";
+import {
   accountDocuments,
   allocations,
 } from "../../functions/src/core/documents";
@@ -266,6 +281,177 @@ async function readLogo(file: File): Promise<string> {
   ctx.drawImage(image, 0, 0, c.width, c.height);
   image.close();
   return c.toDataURL("image/jpeg", 0.86);
+}
+/**
+ * Backup & Restore (Settings). Export shares/downloads a versioned,
+ * checksummed JSON backup. Restore is PREVIEW-ONLY: the file is
+ * validated and its contents counted, but applying it is not wired —
+ * that needs a new perform("restore") hook (see
+ * docs/backup-and-activation.md). The UI says this plainly.
+ */
+function BackupRestoreSection() {
+  const { data } = useShop(),
+    notify = useToast(),
+    [prefs, setPrefs] = useState<BackupPreferences>(() =>
+      loadBackupPreferences(),
+    ),
+    [lastBackup, setLastBackup] = useState<string | null>(() =>
+      loadLastBackupAt(),
+    ),
+    [history, setHistory] = useState<BackupHistoryEntry[]>(() =>
+      loadBackupHistory(),
+    ),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState(""),
+    [preview, setPreview] = useState<BackupFile | null>(null);
+  const doExport = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const file = await createBackup(data);
+      const how =
+        prefs.destination === "share"
+          ? await shareBackupFile(file)
+          : (downloadBackupFile(file), "downloaded");
+      setHistory(markBackupDone(file));
+      setLastBackup(file.createdAt);
+      notify(
+        how === "shared"
+          ? "Backup shared — pick Gmail, WhatsApp or Drive from the share sheet."
+          : "Backup downloaded — send the file to Gmail, WhatsApp or Drive yourself.",
+      );
+    } catch (e) {
+      setError(err(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="panel settings-panel">
+      <div className="section-kicker">
+        <i />
+        BACKUP &amp; RESTORE
+      </div>
+      <h2>Backup &amp; restore</h2>
+      <p className="muted">
+        A daily backup of your shop data stays on this phone as a file. Send
+        it to Gmail, WhatsApp or Google Drive so a new phone can pick it up.
+        Backup runs daily when you open the app — not at a fixed 2am, which
+        needs a native Android scheduler (not built yet). Your shop details
+        live in “Shop profile” above; the backup includes them.
+      </p>
+      <div className="form-grid">
+        <label className="check-line full">
+          <input
+            type="checkbox"
+            checked={prefs.autoReminder}
+            onChange={(e) => {
+              const next = { ...prefs, autoReminder: e.target.checked };
+              setPrefs(next);
+              saveBackupPreferences(next);
+            }}
+          />
+          Remind me daily on opening the app when today’s backup is pending
+        </label>
+        <Field label="Send backup via" full>
+          <Select
+            value={prefs.destination}
+            onChange={(e) => {
+              const next = {
+                ...prefs,
+                destination: e.target.value as BackupDestination,
+              };
+              setPrefs(next);
+              saveBackupPreferences(next);
+            }}
+          >
+            <option value="share">Share sheet (choose Gmail / WhatsApp / Drive)</option>
+            <option value="gmail">Gmail (opens share sheet — Gmail cannot take an attachment by email link)</option>
+            <option value="whatsapp">WhatsApp (opens share sheet)</option>
+            <option value="drive">Google Drive (opens share sheet — needs a one-time sign-in)</option>
+          </Select>
+        </Field>
+      </div>
+      <p className="muted">
+        Last backup:{" "}
+        {lastBackup ? day(new Date(lastBackup).getTime()) : "never yet"}
+      </p>
+      <div className="settings-actions">
+        <span>
+          {history.length
+            ? `${history.length} backup${history.length > 1 ? "s" : ""} kept (last 7)`
+            : "No backups yet."}
+        </span>
+        <button className="btn primary" disabled={busy} onClick={() => void doExport()}>
+          <Download size={15} />
+          {busy ? "Preparing…" : "Backup now"}
+        </button>
+      </div>
+      {history.length > 0 && (
+        <ul className="muted">
+          {history.map((h) => (
+            <li key={h.createdAt}>
+              {day(new Date(h.createdAt).getTime())} · {h.filename} ·{" "}
+              {h.counts.products} products, {h.counts.customers} customers,{" "}
+              {h.counts.invoices} invoices
+            </li>
+          ))}
+        </ul>
+      )}
+      <h3 className="spaced">Restore from a backup file</h3>
+      <p className="muted">
+        Choose a backup file from this phone (or one received on WhatsApp /
+        Gmail / Drive). It is checked first — format, version and checksum.
+      </p>
+      <label className="text-link upload-label">
+        <Upload size={13} />
+        Choose backup file
+        <input
+          type="file"
+          accept="application/json,.json"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            setError("");
+            setPreview(null);
+            try {
+              const result = await parseBackup(await file.text());
+              if (!result.valid) {
+                setError(result.errors.join(" "));
+                return;
+              }
+              setPreview(result.file);
+            } catch (e) {
+              setError(err(e));
+            }
+            e.target.value = "";
+          }}
+        />
+      </label>
+      {preview && (
+        <div className="info-box">
+          <ShieldCheck size={20} />
+          <p>
+            Backup looks valid: <b>{preview.shopName}</b>,{" "}
+            {day(new Date(preview.createdAt).getTime())} —{" "}
+            {preview.counts.products} products, {preview.counts.customers}{" "}
+            customers, {preview.counts.rates} rates, {preview.counts.invoices}{" "}
+            invoices, {preview.counts.drafts} drafts.
+          </p>
+        </div>
+      )}
+      {preview && (
+        <div className="info-box subtle">
+          <p>
+            <b>Preview only.</b> Applying this restore is not built yet — it
+            needs a new <code>perform(&quot;restore&quot;)</code> server hook.
+            Until then, keep the file safe; do not delete the original data.
+          </p>
+        </div>
+      )}
+      <Problem message={error} />
+    </section>
+  );
 }
 export function Settings() {
   const { data, perform, demo, license } = useShop(),
@@ -612,6 +798,7 @@ export function Settings() {
           </button>
         </div>
       </form>
+      <BackupRestoreSection />
     </>
   );
 }

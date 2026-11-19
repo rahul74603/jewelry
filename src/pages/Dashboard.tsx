@@ -2,7 +2,7 @@ import {
   accountDelta,
   accountDocuments,
 } from "../../functions/src/core/documents";
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowDownRight,
@@ -36,6 +36,11 @@ import {
   paymentStatus,
 } from "../../functions/src/core/billing";
 import { Avatar, Empty, Ingots, Select, Status, Icon } from "../components/ui";
+import {
+  loadLastBackupAt,
+  loadBackupPreferences,
+  runDailyCheck,
+} from "../lib/backup";
 import type { Invoice, Workspace } from "../../functions/src/core/model";
 export function SalesChart({ data }: { data: Workspace }) {
   const [length, N] = useState(7),
@@ -269,7 +274,22 @@ export function InvoiceTable({ rows }: { rows: Invoice[] }) {
 }
 export default function Dashboard() {
   const { data } = useShop(),
-    [period, P] = useState(1);
+    [period, P] = useState(1),
+    [backupDue, setBackupDue] = useState(false);
+  // Daily-on-open backup check (MediSmart behaviour): remind once a day
+  // when no backup was made today. Not an exact 02:00 run — that needs
+  // a native Android WorkManager scheduler, which is not built yet.
+  useEffect(() => {
+    try {
+      if (
+        loadBackupPreferences().autoReminder &&
+        runDailyCheck(loadLastBackupAt())
+      )
+        setBackupDue(true);
+    } catch {
+      // Reminder is best-effort; a storage failure must not break Dashboard.
+    }
+  }, []);
   const hi = data.profile.language === "hi";
   const rows = series(data, period),
     sales = rows.reduce((s, r) => s + r.sales, 0),
@@ -345,6 +365,19 @@ export default function Dashboard() {
   ];
   return (
     <div className="dashboard">
+      {backupDue && (
+        <section className="panel">
+          <div className="info-box">
+            <Clock3 size={20} />
+            <p>
+              Today’s backup hasn’t been made yet.{" "}
+              <Link to="/settings">Back up now in Settings</Link> and send the
+              file to Gmail, WhatsApp or Drive so your data survives a lost
+              phone.
+            </p>
+          </div>
+        </section>
+      )}
       <section className="hero">
         <div className="hero-photo" />
         <div className="hero-weave" />

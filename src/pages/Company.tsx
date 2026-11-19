@@ -14,6 +14,10 @@ import { useToast } from "../lib/store";
 import { cash, day, err } from "../lib/format";
 import type { License, Device } from "../../functions/src/core/license";
 import {
+  generateUnlockKey,
+  MASTER_SECRET_PLACEHOLDER,
+} from "../lib/offlineActivation";
+import {
   Brand,
   Empty,
   Field,
@@ -56,6 +60,9 @@ export default function Company() {
     [dev, V] = useState(""),
     [pid, P] = useState(""),
     [token, K] = useState<{ code: string; expiresAt: number } | null>(null),
+    [deviceCode, setDeviceCode] = useState(""),
+    [masterSecret, setMasterSecret] = useState(""),
+    [unlockKey, setUnlockKey] = useState(""),
     notify = useToast();
   const load = async () => {
     const s = await company<Overview>("list");
@@ -157,7 +164,7 @@ export default function Company() {
               </div>
             </div>
             <div className="tabs">
-              {["Shops & licenses", "Devices", "Plans", "Audit log"].map(
+              {["Shops & licenses", "Devices", "Plans", "Audit log", "Offline unlock"].map(
                 (t) => (
                   <button
                     key={t}
@@ -253,6 +260,102 @@ export default function Company() {
                   },
                 ]}
               />
+            ) : tab === "Offline unlock" ? (
+              <section className="panel">
+                <div className="section-kicker">
+                  <i />
+                  MASTER ONLY · OFFLINE ACTIVATION
+                </div>
+                <h2>Offline unlock</h2>
+                <p className="muted">
+                  A shopkeeper on a new device sends you their 8-character
+                  device code on WhatsApp. Paste it here with the master
+                  secret to generate their unlock key, then send the key back.
+                  The key unlocks that device locally only — it does not grant
+                  the live server workspace.
+                </p>
+                <div className="form-grid">
+                  <Field label="Device code from the shopkeeper">
+                    <input
+                      value={deviceCode}
+                      maxLength={8}
+                      autoComplete="off"
+                      placeholder="e.g. A1B2C3D4"
+                      onChange={(e) =>
+                        setDeviceCode(e.target.value.toUpperCase())
+                      }
+                    />
+                  </Field>
+                  <Field
+                    label="Master secret"
+                    hint="Kept in memory only — never stored or sent anywhere."
+                  >
+                    <input
+                      type="password"
+                      value={masterSecret}
+                      autoComplete="off"
+                      placeholder={MASTER_SECRET_PLACEHOLDER}
+                      onChange={(e) => setMasterSecret(e.target.value)}
+                    />
+                  </Field>
+                </div>
+                <p className="footnote">
+                  The master secret is a placeholder (
+                  {MASTER_SECRET_PLACEHOLDER}) until the developer replaces it
+                  with the real long random secret, held off-git. Codes and
+                  keys only match when the same secret is in the local app
+                  build and here.
+                </p>
+                <Problem message={error} />
+                <div className="modal-actions">
+                  <button
+                    className="btn primary"
+                    disabled={busy}
+                    onClick={async () => {
+                      E("");
+                      setUnlockKey("");
+                      if (!masterSecret) {
+                        E("Enter the master secret.");
+                        return;
+                      }
+                      B(true);
+                      try {
+                        setUnlockKey(
+                          await generateUnlockKey(deviceCode, masterSecret),
+                        );
+                      } catch (e) {
+                        E(err(e));
+                      } finally {
+                        B(false);
+                      }
+                    }}
+                  >
+                    <KeyRound size={15} />
+                    Generate unlock key
+                  </button>
+                </div>
+                {unlockKey && (
+                  <div className="qr-code">
+                    <div className="code-box">{unlockKey}</div>
+                    <button
+                      className="btn outline"
+                      onClick={() =>
+                        navigator.clipboard
+                          .writeText(unlockKey)
+                          .then(() => notify("Unlock key copied."))
+                          .catch((e) => E(err(e)))
+                      }
+                    >
+                      <Copy size={14} />
+                      Copy key
+                    </button>
+                    <p className="footnote">
+                      Send this key back to the shopkeeper on WhatsApp. It
+                      works only for the device code above.
+                    </p>
+                  </div>
+                )}
+              </section>
             ) : (
               <Records
                 items={d.events.map((e, i) => ({ ...e, id: String(i) }))}

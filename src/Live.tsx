@@ -30,6 +30,16 @@ import {
 } from "lucide-react";
 import { auth, secured } from "./lib/cloud";
 import { err } from "./lib/format";
+import {
+  codeForInstallId,
+  getInstallId,
+  verifyUnlockKey,
+  isOfflineLicensed,
+  markOfflineLicensed,
+  developerWhatsAppLink,
+  MASTER_SECRET_PLACEHOLDER,
+  DEVELOPER_WHATSAPP,
+} from "./lib/offlineActivation";
 import { Shop, useToast } from "./lib/store";
 import { Brand, Field, Problem } from "./components/ui";
 import { Shell } from "./components/Shell";
@@ -257,6 +267,99 @@ async function scan(file: File) {
   return qr.data;
 }
 type Snapshot = { workspace: Workspace; license: LicenseInfo };
+/**
+ * Offline activation gate (MediSmart v2): shows this device's code,
+ * lets the shopkeeper send it to the developer on WhatsApp, and
+ * verifies the unlock key the developer sends back. Unlocking here
+ * marks the device licensed LOCALLY only — the live workspace above
+ * still needs internet verification.
+ */
+function OfflineActivationGate() {
+  const notify = useToast();
+  const [code, setCode] = useState(""),
+    [key, setKey] = useState(""),
+    [error, setError] = useState(""),
+    [busy, setBusy] = useState(false),
+    [licensed, setLicensed] = useState(() => isOfflineLicensed());
+  useEffect(() => {
+    let alive = true;
+    void getInstallId(auth.currentUser?.uid)
+      .then((id) => codeForInstallId(id, MASTER_SECRET_PLACEHOLDER))
+      .then((c) => {
+        if (alive) setCode(c);
+      })
+      .catch((e) => {
+        if (alive) setError(err(e));
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  if (licensed)
+    return (
+      <div className="info-box">
+        <ShieldCheck size={20} />
+        <p>
+          This device is unlocked offline. The live workspace still needs an
+          internet connection for server verification.
+        </p>
+      </div>
+    );
+  return (
+    <div className="auth-form">
+      <h3>Or unlock this device offline</h3>
+      <p className="muted">
+        First launch on a new device? Send your device code to the developer
+        and enter the unlock key they send back. (MediSmart-style activation.)
+      </p>
+      <div className="code-box">{code || "Loading device code…"}</div>
+      <a
+        className="btn outline"
+        href={code ? developerWhatsAppLink(code) : undefined}
+        target="_blank"
+        rel="noreferrer"
+      >
+        Send this code to developer on WhatsApp (+91 {DEVELOPER_WHATSAPP.slice(2)})
+      </a>
+      <Field label="Unlock key from developer">
+        <input
+          value={key}
+          maxLength={8}
+          autoComplete="off"
+          placeholder="8-character key"
+          onChange={(e) => setKey(e.target.value.toUpperCase())}
+        />
+      </Field>
+      <Problem message={error} />
+      <button
+        className="btn primary"
+        disabled={busy || !code || key.length !== 8}
+        onClick={async () => {
+          setBusy(true);
+          setError("");
+          try {
+            const ok = await verifyUnlockKey(
+              code,
+              key,
+              MASTER_SECRET_PLACEHOLDER,
+            );
+            if (!ok) throw Error("That key does not match this device code.");
+            markOfflineLicensed();
+            setLicensed(true);
+            notify("Device unlocked offline.");
+          } catch (e) {
+            setError(err(e));
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <KeyRound size={15} />
+        {busy ? "Verifying…" : "Verify unlock key"}
+      </button>
+    </div>
+  );
+}
 function LicensedShop() {
   const [snapshot, S] = useState<Snapshot | null>(null),
     [loading, L] = useState(true),
@@ -414,6 +517,7 @@ function LicensedShop() {
           Sign out
         </button>
       </div>
+      <OfflineActivationGate />
     </Gate>
   );
 }
