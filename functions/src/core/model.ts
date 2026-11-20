@@ -304,7 +304,68 @@ export type Action =
   | "invoice"
   | "draft"
   | "void"
-  | "adjust";
+  | "adjust"
+  | "restore";
+
+/** A full workspace snapshot as stored in a backup file. Invoices are
+ * computed snapshots, so only their identifying + money fields are
+ * re-checked here — the rest passes through untouched (loose objects),
+ * and the backup checksum (validateBackup) is what guarantees the
+ * snapshot is exactly what was backed up. */
+const invoiceSnapshotSchema = z.looseObject({
+  id,
+  number: z.string().min(1).max(80),
+  issuedAt: z.string(),
+  type: z.enum(["Non-GST bill", "GST invoice", "Estimate", "Advance receipt"]),
+  customer: customerSchema.nullable(),
+  shop: profileSchema,
+  lines: z.array(
+    z.looseObject({
+      productId: id,
+      quantity: z.number().int().min(1).max(10000),
+      totalPaise: z.number().int(),
+    }),
+  ),
+  subtotalPaise: z.number().int().nonnegative(),
+  taxPaise: z.number().int().nonnegative(),
+  roundOffPaise: z.number().int(),
+  totalPaise: z.number().int().nonnegative(),
+  paidPaise: z.number().int().nonnegative(),
+  balancePaise: z.number().int().nonnegative(),
+  mode: z.enum([...tenderModes, "Split"]),
+  input: invoiceSchema,
+});
+const draftSnapshotSchema = z
+  .looseObject({
+    ...invoiceSchema.shape,
+    settlement: z.enum(["part", "full"]),
+    updatedAt: z.string(),
+  })
+  .refine(
+    (i) =>
+      i.type === "Advance receipt"
+        ? i.items.length === 0 &&
+          !!i.customerId &&
+          !!i.advanceFor &&
+          i.paid > 0 &&
+          !i.sourceEstimate
+        : i.items.length > 0,
+    {
+      message:
+        "A sale needs items; an advance needs a customer, purpose and positive deposit, without stock.",
+    },
+  );
+/** Validates a whole-workspace payload before a restore applies it.
+ * Used by both the demo mutation and the server handler, so a bad
+ * payload can never silently wipe the workspace. */
+export const workspaceSchema = z.object({
+  profile: profileSchema,
+  products: z.array(productSchema).max(2000),
+  customers: z.array(customerSchema).max(2000),
+  rates: z.array(rateSchema).max(2000),
+  invoices: z.array(invoiceSnapshotSchema).max(2000),
+  drafts: z.array(draftSnapshotSchema).max(2000),
+});
 export const adjustment = z.object({
   id,
   productId: id,

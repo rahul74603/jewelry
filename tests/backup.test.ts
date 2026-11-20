@@ -99,9 +99,16 @@ describe("offline backup", () => {
     expect((await parseBackup("{not json")).valid).toBe(false);
   });
 
-  it("names the file with shop slug and date", () => {
+  it("names one rolling file per year (same file overwritten daily)", () => {
     expect(backupFilename("Test Jewellers", new Date("2026-11-19T10:00:00Z"))).toBe(
-      "aurum-backup-test-jewellers-2026-11-19.json",
+      "aurum-backup-test-jewellers-2026.json",
+    );
+    expect(backupFilename("Test Jewellers", new Date("2027-01-01T10:00:00Z"))).toBe(
+      "aurum-backup-test-jewellers-2027.json",
+    );
+    // Same year, different days → the same file.
+    expect(backupFilename("Test Jewellers", new Date("2026-01-01T10:00:00Z"))).toBe(
+      backupFilename("Test Jewellers", new Date("2026-12-31T10:00:00Z")),
     );
   });
 
@@ -114,19 +121,27 @@ describe("offline backup", () => {
     expect(runDailyCheck(null)).toBe(true);
   });
 
-  it("keeps only the last 7 backups in history", () => {
-    const history = Array.from({ length: 9 }, (_, i) => ({
-      createdAt: `2026-11-${String(i + 1).padStart(2, "0")}T00:00:00.000Z`,
-      filename: `b${i}.json`,
+  it("keeps one history entry per yearly file — old years stay listed", () => {
+    const entry = (year: number) => ({
+      createdAt: `${year}-06-01T00:00:00.000Z`,
+      filename: `aurum-backup-test-jewellers-${year}.json`,
       shopName: "Test Jewellers",
       counts: { products: 0, customers: 0, rates: 0, invoices: 0, drafts: 0 },
-    }));
-    const kept = recordBackupHistory(
-      history.slice(0, 8),
-      history[8],
-    );
-    expect(kept).toHaveLength(MAX_BACKUP_HISTORY);
-    expect(kept[0].createdAt).toContain("2026-11-09");
+    });
+    // Overwriting the same year's file just refreshes its entry.
+    const refreshed = recordBackupHistory([entry(2026)], {
+      ...entry(2026),
+      createdAt: "2026-11-20T00:00:00.000Z",
+    });
+    expect(refreshed).toHaveLength(1);
+    expect(refreshed[0].createdAt).toContain("2026-11-20");
+    // Eleven different years → only the newest 10 are kept.
+    let history: typeof refreshed = [];
+    for (let y = 2016; y <= 2026; y++)
+      history = recordBackupHistory(history, entry(y));
+    expect(history).toHaveLength(MAX_BACKUP_HISTORY);
+    expect(history[0].filename).toContain("2026");
+    expect(history[history.length - 1].filename).toContain("2017");
   });
 
   it("carries only the 6 real workspace collections", async () => {

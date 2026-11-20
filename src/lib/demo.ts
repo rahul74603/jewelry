@@ -14,6 +14,7 @@ import {
   draftSchema,
   finalizeSchema,
   adjustment,
+  workspaceSchema,
 } from "../../functions/src/core/model";
 import {
   calculateInvoice,
@@ -280,6 +281,12 @@ export function demoMutation(
     postings(b, true).movements.forEach((m) => {
       d.products.find((p) => p.id === m.productId)!.stock += m.delta;
     });
+  } else if (action === "restore") {
+    // Whole-workspace replace from a backup file. The payload must be a
+    // backup's data that already passed validateBackup() (checksum +
+    // counts) in the UI — it is re-parsed here so a bad payload can never
+    // silently wipe the workspace. No bypass, no merge: the backup wins.
+    return structuredClone(workspaceSchema.parse(raw) as unknown as Workspace);
   } else throw Error("Unsupported sample operation.");
   return d;
 }

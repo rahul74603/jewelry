@@ -33,18 +33,20 @@ import {
   Records,
   Empty,
   GemMark,
+  Modal,
 } from "../components/ui";
 import { markSaved } from "../lib/navigation";
 import {
   createBackup,
   parseBackup,
   shareBackupFile,
-  downloadBackupFile,
+  downloadBackupToDevice,
   loadLastBackupAt,
   loadBackupHistory,
   loadBackupPreferences,
   saveBackupPreferences,
   markBackupDone,
+  BACKUP_FOLDER,
   type BackupFile,
   type BackupHistoryEntry,
   type BackupPreferences,
@@ -283,14 +285,16 @@ async function readLogo(file: File): Promise<string> {
   return c.toDataURL("image/jpeg", 0.86);
 }
 /**
- * Backup & Restore (Settings). Export shares/downloads a versioned,
- * checksummed JSON backup. Restore is PREVIEW-ONLY: the file is
- * validated and its contents counted, but applying it is not wired —
- * that needs a new perform("restore") hook (see
- * docs/backup-and-activation.md). The UI says this plainly.
+ * Backup & Restore (Settings). One tap saves the shop's whole data as
+ * a single yearly file (Documents/AurumBackup/aurum-backup-<shop>-<YYYY>.json),
+ * overwritten in place every day. Restore picks a file, validates it
+ * (format, version, SHA-256 checksum, counts), asks once, then applies
+ * it with perform("restore") — the whole workspace is replaced.
+ * No Gmail backup; WhatsApp / Drive are manual picks on the Share
+ * sheet, and there is no automatic Drive upload.
  */
 function BackupRestoreSection() {
-  const { data } = useShop(),
+  const { data, perform } = useShop(),
     notify = useToast(),
     [prefs, setPrefs] = useState<BackupPreferences>(() =>
       loadBackupPreferences(),
@@ -303,22 +307,54 @@ function BackupRestoreSection() {
     ),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
-    [preview, setPreview] = useState<BackupFile | null>(null);
+    [preview, setPreview] = useState<BackupFile | null>(null),
+    [confirmRestore, setConfirmRestore] = useState(false);
   const doExport = async () => {
     setBusy(true);
     setError("");
     try {
       const file = await createBackup(data);
-      const how =
-        prefs.destination === "share"
-          ? await shareBackupFile(file)
-          : (downloadBackupFile(file), "downloaded");
+      if (prefs.destination === "share") {
+        const how = await shareBackupFile(file);
+        setHistory(markBackupDone(file));
+        setLastBackup(file.createdAt);
+        notify(
+          how === "shared"
+            ? "Backup shared — pick WhatsApp or Drive from the share sheet."
+            : "Backup downloaded.",
+        );
+        return;
+      }
+      const saved = await downloadBackupToDevice(file);
       setHistory(markBackupDone(file));
       setLastBackup(file.createdAt);
       notify(
-        how === "shared"
-          ? "Backup shared — pick Gmail, WhatsApp or Drive from the share sheet."
-          : "Backup downloaded — send the file to Gmail, WhatsApp or Drive yourself.",
+        saved.method === "device-folder"
+          ? `Backup saved — ${saved.location}. Same file, updated every day.`
+          : saved.method === "shared"
+            ? "Could not write to the AurumBackup folder — backup shared instead. Pick WhatsApp or Drive from the share sheet."
+            : "Could not write to the AurumBackup folder — backup downloaded instead.",
+      );
+    } catch (e) {
+      setError(err(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const doRestore = async () => {
+    if (!preview) return;
+    setBusy(true);
+    setError("");
+    try {
+      // The file already passed parseBackup() (format, version, checksum,
+      // counts) before the preview was shown; the restore hook re-parses
+      // it once more, so a bad file can never wipe the workspace.
+      await perform("restore", preview.data);
+      const counts = preview.counts;
+      setPreview(null);
+      setConfirmRestore(false);
+      notify(
+        `Restored — ${counts.products} products, ${counts.customers} customers, ${counts.rates} rates, ${counts.invoices} invoices, ${counts.drafts} drafts.`,
       );
     } catch (e) {
       setError(err(e));
@@ -334,11 +370,15 @@ function BackupRestoreSection() {
       </div>
       <h2>Backup &amp; restore</h2>
       <p className="muted">
-        A daily backup of your shop data stays on this phone as a file. Send
-        it to Gmail, WhatsApp or Google Drive so a new phone can pick it up.
-        Backup runs daily when you open the app — not at a fixed 2am, which
-        needs a native Android scheduler (not built yet). Your shop details
-        live in “Shop profile” above; the backup includes them.
+        One tap saves all your shop data as a single file in the
+        Documents/{BACKUP_FOLDER} folder on this phone — one file per year
+        (aurum-backup-&lt;shop&gt;-&lt;year&gt;.json), overwritten every day,
+        so there is always one current file and old years stay separate.
+        Backup runs daily when you open the app — not at a fixed 2am,
+        which needs a native Android scheduler (not built yet). Your shop
+        details live in “Shop profile” above; the backup includes them.
+        No Gmail backup — to keep a copy elsewhere, share the file to
+        WhatsApp or Drive yourself from the share sheet.
       </p>
       <div className="form-grid">
         <label className="check-line full">
@@ -353,7 +393,7 @@ function BackupRestoreSection() {
           />
           Remind me daily on opening the app when today’s backup is pending
         </label>
-        <Field label="Send backup via" full>
+        <Field label="Backup now saves to" full>
           <Select
             value={prefs.destination}
             onChange={(e) => {
@@ -365,10 +405,8 @@ function BackupRestoreSection() {
               saveBackupPreferences(next);
             }}
           >
-            <option value="share">Share sheet (choose Gmail / WhatsApp / Drive)</option>
-            <option value="gmail">Gmail (opens share sheet — Gmail cannot take an attachment by email link)</option>
-            <option value="whatsapp">WhatsApp (opens share sheet)</option>
-            <option value="drive">Google Drive (opens share sheet — needs a one-time sign-in)</option>
+            <option value="download">Download to this phone (Documents/{BACKUP_FOLDER})</option>
+            <option value="share">Share sheet (send to WhatsApp / Drive yourself)</option>
           </Select>
         </Field>
       </div>
@@ -379,7 +417,7 @@ function BackupRestoreSection() {
       <div className="settings-actions">
         <span>
           {history.length
-            ? `${history.length} backup${history.length > 1 ? "s" : ""} kept (last 7)`
+            ? `${history.length} yearly backup file${history.length > 1 ? "s" : ""} kept (one per year)`
             : "No backups yet."}
         </span>
         <button className="btn primary" disabled={busy} onClick={() => void doExport()}>
@@ -401,7 +439,8 @@ function BackupRestoreSection() {
       <h3 className="spaced">Restore from a backup file</h3>
       <p className="muted">
         Choose a backup file from this phone (or one received on WhatsApp /
-        Gmail / Drive). It is checked first — format, version and checksum.
+        Drive). It is checked first — format, version and checksum — then
+        your current data on this phone is replaced by the backup.
       </p>
       <label className="text-link upload-label">
         <Upload size={13} />
@@ -441,14 +480,55 @@ function BackupRestoreSection() {
         </div>
       )}
       {preview && (
-        <div className="info-box subtle">
-          <p>
-            <b>Preview only.</b> Applying this restore is not built yet — it
-            needs a new <code>perform(&quot;restore&quot;)</code> server hook.
-            Until then, keep the file safe; do not delete the original data.
-          </p>
+        <div className="settings-actions">
+          <span>
+            Restoring replaces the data on this phone with the backup.
+          </span>
+          <button
+            className="btn primary"
+            disabled={busy}
+            onClick={() => setConfirmRestore(true)}
+          >
+            <Upload size={15} />
+            Restore this backup
+          </button>
         </div>
       )}
+      <Modal
+        open={confirmRestore && !!preview}
+        onClose={() => setConfirmRestore(false)}
+        title="Restore this backup?"
+        description="Your current products, customers, rates, bills and drafts on this phone will be replaced by the backup file. This cannot be undone — make a fresh backup first if you are unsure."
+      >
+        {preview && (
+          <>
+            <p className="muted">
+              <b>{preview.shopName}</b>,{" "}
+              {day(new Date(preview.createdAt).getTime())} —{" "}
+              {preview.counts.products} products, {preview.counts.customers}{" "}
+              customers, {preview.counts.rates} rates,{" "}
+              {preview.counts.invoices} invoices, {preview.counts.drafts}{" "}
+              drafts.
+            </p>
+            <div className="settings-actions">
+              <button
+                className="btn outline"
+                disabled={busy}
+                onClick={() => setConfirmRestore(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn primary"
+                disabled={busy}
+                onClick={() => void doRestore()}
+              >
+                {busy ? "Restoring…" : "Yes, restore"}
+              </button>
+            </div>
+          </>
+        )}
+      </Modal>
       <Problem message={error} />
     </section>
   );

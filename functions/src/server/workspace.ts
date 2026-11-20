@@ -18,6 +18,7 @@ import {
   draftSchema,
   finalizeSchema,
   confirmationSchema,
+  workspaceSchema,
 } from "../core/model";
 import {
   assertDraftPayment,
@@ -39,6 +40,18 @@ async function rows<T>(
       `Pilot workspace limit reached for ${name}; contact support for a paginated deployment.`,
     );
   return s.docs.map((d) => d.data() as T);
+}
+async function refs(
+  tx: FirebaseFirestore.Transaction,
+  t: FirebaseFirestore.DocumentReference,
+  name: string,
+) {
+  const s = await tx.get(t.collection(name).limit(amountCap + 1));
+  if (s.size > amountCap)
+    throw Error(
+      `Pilot workspace limit reached for ${name}; contact support for a paginated deployment.`,
+    );
+  return s.docs.map((d) => d.ref);
 }
 export async function shopAction(
   tx: FirebaseFirestore.Transaction,
@@ -336,6 +349,109 @@ export async function shopAction(
       });
     log(input ? "Document finalized" : "Document reversed", key);
     return { id: key, number: b.number };
+  }
+  if (action === "restore") {
+    // Whole-workspace replace from a backup file. The payload must be a
+    // backup's data that already passed validateBackup() (checksum +
+    // counts) in the UI — it is re-parsed here so a bad payload can never
+    // silently wipe the workspace. Replaces the 6 workspace collections;
+    // reversals/conversions are rebuilt from the restored invoices so
+    // voided/converted flags survive the read-back. Payment, ledger and
+    // stock-movement history are derived data and are NOT rebuilt from
+    // the backup (they are not part of the 6 collections).
+    const next = workspaceSchema.parse(raw) as unknown as import("../core/model").Workspace;
+    const buckets: [string, { id: string }[]][] = [
+      ["products", next.products],
+      ["metalRates", next.rates],
+      ["customers", next.customers],
+      ["invoices", next.invoices],
+      ["drafts", next.drafts],
+    ];
+    const [oldRefs, oldReversals, oldConversions] = await Promise.all([
+      Promise.all(buckets.map(([name]) => refs(tx, t, name))).then((rs) =>
+        rs.flat(),
+      ),
+      refs(tx, t, "reversals"),
+      refs(tx, t, "conversions"),
+    ]);
+    const voided = next.invoices.filter((b) => b.voidedAt);
+    const converted = next.invoices.filter((b) => b.convertedTo);
+    // Firestore transactions allow 500 writes — refuse an oversized
+    // restore instead of failing halfway.
+    const writes =
+      oldRefs.length +
+      oldReversals.length +
+      oldConversions.length +
+      1 +
+      buckets.reduce((n, [, items]) => n + items.length, 0) +
+      voided.length +
+      converted.length +
+      4 +
+      1;
+    if (writes > 450)
+      throw Error(
+        "Backup is too large to restore in one go — contact support for a paginated restore.",
+      );
+    for (const ref of [...oldRefs, ...oldReversals, ...oldConversions])
+      tx.delete(ref);
+    tx.set(profileRef, next.profile);
+    for (const [name, items] of buckets)
+      for (const item of items) tx.set(record(name, item.id), item);
+    for (const b of voided)
+      tx.create(record("reversals", b.id), {
+        id: b.id,
+        at: b.voidedAt,
+        ...(b.creditNote ? { creditNote: b.creditNote } : {}),
+        reason: "Restored backup",
+        uid,
+      });
+    for (const b of converted)
+      tx.create(record("conversions", b.id), {
+        id: b.id,
+        invoiceId: b.convertedTo,
+        at: b.issuedAt,
+      });
+    // Bump document counters past the highest restored number per series
+    // so the next bill/estimate/advance/credit note cannot collide.
+    const seqOf = (n: string | undefined) => {
+      const m = n?.match(/-(\d+)$/);
+      return m ? parseInt(m[1], 10) : 0;
+    };
+    const maxSeq = (pick: (b: Invoice) => string | undefined) =>
+      next.invoices.reduce((m, b) => Math.max(m, seqOf(pick(b))), 0);
+    const counters: [string, number][] = [
+      [
+        "invoices",
+        maxSeq((b) =>
+          b.type === "Non-GST bill" || b.type === "GST invoice"
+            ? b.number
+            : undefined,
+        ),
+      ],
+      ["estimates", maxSeq((b) => (b.type === "Estimate" ? b.number : undefined))],
+      [
+        "advances",
+        maxSeq((b) => (b.type === "Advance receipt" ? b.number : undefined)),
+      ],
+      ["credits", maxSeq((b) => b.creditNote?.number)],
+    ];
+    for (const [docId, seq] of counters) {
+      if (!seq) continue;
+      const ref = record("counters", docId);
+      const cur = (await tx.get(ref)).get("value") ?? 0;
+      if (seq > cur) tx.set(ref, { value: seq });
+    }
+    log("Workspace restored from backup", "restore");
+    return {
+      ok: true,
+      counts: {
+        products: next.products.length,
+        customers: next.customers.length,
+        rates: next.rates.length,
+        invoices: next.invoices.length,
+        drafts: next.drafts.length,
+      },
+    };
   }
   throw Error("Unknown shop operation.");
 }

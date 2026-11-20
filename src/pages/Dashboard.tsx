@@ -371,9 +371,10 @@ export default function Dashboard() {
             <Clock3 size={20} />
             <p>
               Today’s backup hasn’t been made yet.{" "}
-              <Link to="/settings">Back up now in Settings</Link> and send the
-              file to Gmail, WhatsApp or Drive so your data survives a lost
-              phone.
+              <Link to="/settings">Back up now in Settings</Link> — one tap
+              saves it to the AurumBackup folder on this phone, so your data
+              survives a lost phone. Share the file to WhatsApp or Drive
+              yourself for a second copy.
             </p>
           </div>
         </section>
