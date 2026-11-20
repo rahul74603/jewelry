@@ -411,7 +411,12 @@ function BackupRestoreSection() {
         `Google Drive folder connected — ${folder.name}. Every backup will also be saved there.`,
       );
     } catch (e) {
-      setError(err(e));
+      const message = err(e);
+      setError(
+        message.includes("drive-app-missing")
+          ? "Google Drive is not reachable on this phone — install the Google Drive app from the Play Store, then pick a folder."
+          : message,
+      );
     } finally {
       setBusy(false);
     }

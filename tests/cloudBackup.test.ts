@@ -147,6 +147,18 @@ describe("picking the Drive folder", () => {
     expect(folder).toBeNull();
     expect(loadCloudFolder(store)).toBeNull();
   });
+  it("fails clearly when the Drive app is missing on the phone", async () => {
+    const { store } = memoryCloudStore();
+    const native = fakeNative({
+      pickFolder: async () => {
+        throw new Error("drive-app-missing");
+      },
+    });
+    await expect(pickCloudFolder(native, store)).rejects.toThrow(
+      "drive-app-missing",
+    );
+    expect(loadCloudFolder(store)).toBeNull();
+  });
 });
 
 describe("uploading the yearly file to Drive", () => {

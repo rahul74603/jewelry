@@ -3,7 +3,6 @@ import { Copy, KeyRound } from "lucide-react";
 import {
   generateUnlockKey,
   DEVELOPER_WHATSAPP,
-  MASTER_SECRET_PLACEHOLDER,
 } from "./lib/offlineActivation";
 import { err } from "./lib/format";
 import { Brand, Field, Problem } from "./components/ui";
@@ -19,9 +18,8 @@ import { Brand, Field, Problem } from "./components/ui";
  * back on WhatsApp. No billing, no demo data, no sign-in.
  *
  * The key only matches when the same master secret is in the user app
- * build and here. The secret is still the placeholder
- * MASTER_SECRET_PLACEHOLDER until the developer replaces it with the
- * real long random secret, held off-git.
+ * build and here. The secret is Ajay's chosen short secret, kept in
+ * git by his choice — and it is never displayed anywhere in this app.
  */
 export default function Master() {
   const [deviceCode, setDeviceCode] = useState(""),
@@ -65,7 +63,7 @@ export default function Master() {
                 type="password"
                 value={masterSecret}
                 autoComplete="off"
-                placeholder={MASTER_SECRET_PLACEHOLDER}
+                placeholder="Enter master secret"
                 onChange={(e) => setMasterSecret(e.target.value)}
               />
             </Field>
@@ -118,11 +116,9 @@ export default function Master() {
               </div>
             )}
             <p className="footnote">
-              The master secret is a placeholder (
-              {MASTER_SECRET_PLACEHOLDER}) until the developer replaces it
-              with the real long random secret, held off-git. Codes and keys
-              only match when the same secret is in the user app build and
-              here.
+              The master secret is known only to the developer — it is
+              never shown here. Codes and keys only match when the same
+              secret is in the user app build and here.
             </p>
           </div>
         </section>

@@ -13,10 +13,7 @@ import { auth, company } from "../lib/cloud";
 import { useToast } from "../lib/store";
 import { cash, day, err } from "../lib/format";
 import type { License, Device } from "../../functions/src/core/license";
-import {
-  generateUnlockKey,
-  MASTER_SECRET_PLACEHOLDER,
-} from "../lib/offlineActivation";
+import { generateUnlockKey } from "../lib/offlineActivation";
 import {
   Brand,
   Empty,
@@ -294,17 +291,15 @@ export default function Company() {
                       type="password"
                       value={masterSecret}
                       autoComplete="off"
-                      placeholder={MASTER_SECRET_PLACEHOLDER}
+                      placeholder="Enter master secret"
                       onChange={(e) => setMasterSecret(e.target.value)}
                     />
                   </Field>
                 </div>
                 <p className="footnote">
-                  The master secret is a placeholder (
-                  {MASTER_SECRET_PLACEHOLDER}) until the developer replaces it
-                  with the real long random secret, held off-git. Codes and
-                  keys only match when the same secret is in the local app
-                  build and here.
+                  The master secret is known only to the developer — it is
+                  never shown here. Codes and keys only match when the same
+                  secret is in the local app build and here.
                 </p>
                 <Problem message={error} />
                 <div className="modal-actions">
