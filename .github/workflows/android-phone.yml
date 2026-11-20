@@ -52,7 +52,7 @@ jobs:
           cp android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk phone/Aurum-Customer-arm64.apk
           cp android/app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk phone/Aurum-Customer-armeabi.apk
           cp android/app/build/outputs/apk/debug/app-x86_64-debug.apk phone/Aurum-Customer-x86_64.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose phone/Aurum-Customer-arm64.apk phone/Aurum-Customer-armeabi.apk phone/Aurum-Customer-x86_64.apk
+          for apk in phone/Aurum-Customer-arm64.apk phone/Aurum-Customer-armeabi.apk phone/Aurum-Customer-x86_64.apk; do "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$apk"; done
           cd phone && sha256sum Aurum-Customer-arm64.apk Aurum-Customer-armeabi.apk > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
@@ -92,7 +92,7 @@ jobs:
           mkdir -p master
           cp android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk master/Aurum-Master-arm64.apk
           cp android/app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk master/Aurum-Master-armeabi.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose master/Aurum-Master-arm64.apk master/Aurum-Master-armeabi.apk
+          for apk in master/Aurum-Master-arm64.apk master/Aurum-Master-armeabi.apk; do "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$apk"; done
           cd master && sha256sum Aurum-Master-arm64.apk Aurum-Master-armeabi.apk > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
