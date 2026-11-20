@@ -84,9 +84,13 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - run: npm ci && npm test && npm run build
       - run: npx --no-install cap sync android
+      - name: Brand the master app (own package + label)
+        run: |
+          sed -i 's|Aurum Workspace|Aurum Master|g' android/app/src/main/res/values/strings.xml
+          grep app_name android/app/src/main/res/values/strings.xml
       - name: Package split debug APKs (arm64 + armeabi + x86_64)
         working-directory: android
-        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug
+        run: ./gradlew --no-daemon -PaurumAppIdSuffix=.master :app:testDebugUnitTest :app:assembleDebug
       - name: Prepare split master APKs (arm64 + armeabi publish, x86_64 not published)
         run: |
           mkdir -p master
