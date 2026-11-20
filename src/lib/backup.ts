@@ -1,24 +1,26 @@
 /**
- * Offline backup / restore (preview) for Aurum.
+ * Offline backup / restore for Aurum.
  *
  * MediSmart-style daily backup, adapted for Aurum's workspace model:
- * a versioned JSON file with a SHA-256 checksum over canonical JSON,
- * exported by the shopkeeper (Share sheet / download) and picked up
- * again on a new phone. There is NO automatic upload: Gmail cannot
- * take an attachment via `mailto:`, and Google Drive needs a one-time
- * sign-in, so the file is shared/downloaded and the shopkeeper picks
- * Gmail / WhatsApp / Drive from the system share sheet.
+ * a versioned JSON file with a SHA-256 checksum over canonical JSON.
+ *
+ * One file per year, overwritten daily: `aurum-backup-<shop>-<YYYY>.json`
+ * lives in the phone's Documents/AurumBackup folder and is overwritten
+ * in place every day, so there is always exactly one current file and
+ * old years stay listed separately. No Gmail backup — the shopkeeper
+ * downloads the file in one tap (Backup now) or shares it manually
+ * (WhatsApp / Drive) from the Share sheet. There is NO automatic
+ * upload: Google Drive needs a one-time sign-in, so Drive stays a
+ * manual share, not an auto-upload.
  *
  * Backup runs daily-on-open (like MediSmart), NOT at an exact 02:00 —
  * an exact 02:00 backup needs a native Android WorkManager scheduler
  * plus a battery-optimisation exemption, which is not built yet.
  *
- * Restore is PREVIEW-ONLY: validation + counts work, but applying a
- * restore is not wired. Applying needs a new `perform("restore",
- * workspaceData)` hook (an `"restore"` Action in
- * functions/src/core/model.ts, a demoMutation case, and a server
- * handler in functions/src/server/workspace.ts). Never claim a
- * restore applies data until that hook exists.
+ * Restore is real: pick a file → validateBackup() (format, version,
+ * SHA-256 checksum, counts) → confirm → perform("restore", data)
+ * replaces the whole workspace. The hook refuses to apply anything
+ * that fails validation.
  *
  * The workspace has exactly 6 real collections (see
  * functions/src/core/model.ts `Workspace`): profile, products,
@@ -26,6 +28,7 @@
  * payments / customerLedger / stockMovements / reversals /
  * conversions collections — they do not exist in the model.
  */
+import { Capacitor } from "@capacitor/core";
 import {
   stableJson,
   type Workspace,
@@ -33,9 +36,12 @@ import {
 
 export const BACKUP_FORMAT = "aurum-backup" as const;
 export const BACKUP_VERSION = 1;
-export const MAX_BACKUP_HISTORY = 7;
+/** One history entry per yearly file — old years stay listed. */
+export const MAX_BACKUP_HISTORY = 10;
+/** Folder inside the phone's Documents where the yearly file lives. */
+export const BACKUP_FOLDER = "AurumBackup";
 
-export type BackupDestination = "share" | "gmail" | "whatsapp" | "drive";
+export type BackupDestination = "download" | "share";
 
 export type BackupPreferences = {
   /** Daily reminder on app start when no backup was made today. */
@@ -46,7 +52,7 @@ export type BackupPreferences = {
 
 export const DEFAULT_BACKUP_PREFERENCES: BackupPreferences = {
   autoReminder: true,
-  destination: "share",
+  destination: "download",
 };
 
 export type BackupCounts = {
@@ -124,6 +130,10 @@ export function backupToJson(file: BackupFile): string {
   return JSON.stringify(file, null, 2);
 }
 
+/** One rolling file per year: `aurum-backup-<shop>-<YYYY>.json`. The
+ * same file is overwritten every day within the year; a new file
+ * starts each January. Old data stays inside the file — it is a full
+ * snapshot of the shop, not a daily delta. */
 export function backupFilename(
   shopName: string,
   at = new Date(),
@@ -133,8 +143,7 @@ export function backupFilename(
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 40) || "aurum";
-  const day = at.toISOString().slice(0, 10);
-  return `aurum-backup-${slug}-${day}.json`;
+  return `aurum-backup-${slug}-${at.getFullYear()}.json`;
 }
 
 export type BackupValidation =
@@ -216,12 +225,13 @@ export function runDailyCheck(
   return shouldAutoBackup(lastBackupAt, now);
 }
 
-/** Keep only the most recent 7 backup entries, newest first. */
+/** Keep one entry per yearly file (same file overwritten daily just
+ * updates its entry), newest first. Old years stay listed. */
 export function recordBackupHistory(
   history: BackupHistoryEntry[],
   entry: BackupHistoryEntry,
 ): BackupHistoryEntry[] {
-  const merged = [entry, ...history.filter((h) => h.createdAt !== entry.createdAt)];
+  const merged = [entry, ...history.filter((h) => h.filename !== entry.filename)];
   merged.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return merged.slice(0, MAX_BACKUP_HISTORY);
 }
@@ -255,14 +265,23 @@ export function loadBackupHistory(): BackupHistoryEntry[] {
 }
 
 export function loadBackupPreferences(): BackupPreferences {
-  return { ...DEFAULT_BACKUP_PREFERENCES, ...readJson<Partial<BackupPreferences>>(PREFS_KEY) };
+  const prefs = {
+    ...DEFAULT_BACKUP_PREFERENCES,
+    ...readJson<Partial<BackupPreferences>>(PREFS_KEY),
+  };
+  // Migrate old destination values (gmail / whatsapp / drive) — Gmail
+  // backup was removed; WhatsApp/Drive are manual picks on the Share
+  // sheet, not a saved destination.
+  if (prefs.destination !== "download" && prefs.destination !== "share")
+    prefs.destination = "download";
+  return prefs;
 }
 
 export function saveBackupPreferences(prefs: BackupPreferences): void {
   writeJson(PREFS_KEY, prefs);
 }
 
-/** Record a completed backup (updates last-backup date + last-7 history). */
+/** Record a completed backup (updates last-backup date + per-year history). */
 export function markBackupDone(file: BackupFile): BackupHistoryEntry[] {
   writeJson(LAST_BACKUP_KEY, file.createdAt);
   const history = recordBackupHistory(loadBackupHistory(), {
@@ -273,6 +292,60 @@ export function markBackupDone(file: BackupFile): BackupHistoryEntry[] {
   });
   writeJson(HISTORY_KEY, history);
   return history;
+}
+
+export type BackupSaveResult = {
+  /** How the file was saved: straight into the phone folder, via the
+   * share sheet, or as a browser download. */
+  method: "device-folder" | "shared" | "downloaded";
+  filename: string;
+  /** Exact place the shopkeeper can find the file. */
+  location: string;
+};
+
+/**
+ * One-tap backup download. On the phone the yearly file is written
+ * straight to Documents/AurumBackup/ — the same file overwritten in
+ * place every day, no share sheet, no picking a folder. If the direct
+ * write fails (storage unavailable / permission denied) it falls back
+ * to the share sheet, and if that is unavailable, to a browser
+ * download — and says so, so the shopkeeper is never left guessing
+ * where the file went. On the web build it is a plain download.
+ */
+export async function downloadBackupToDevice(
+  file: BackupFile,
+): Promise<BackupSaveResult> {
+  const filename = backupFilename(file.shopName, new Date(file.createdAt));
+  if (Capacitor.getPlatform() === "android") {
+    try {
+      const { Filesystem, Directory, Encoding } = await import(
+        "@capacitor/filesystem"
+      );
+      await Filesystem.writeFile({
+        path: `${BACKUP_FOLDER}/${filename}`,
+        data: backupToJson(file),
+        directory: Directory.Documents,
+        encoding: Encoding.UTF8,
+        recursive: true,
+      });
+      return {
+        method: "device-folder",
+        filename,
+        location: `Documents/${BACKUP_FOLDER}/${filename}`,
+      };
+    } catch {
+      // Direct write failed — fall through to the share sheet below.
+    }
+  }
+  const how = await shareBackupFile(file);
+  return {
+    method: how === "shared" ? "shared" : "downloaded",
+    filename,
+    location:
+      how === "shared"
+        ? "shared from this phone — pick WhatsApp or Drive in the share sheet"
+        : "Downloads folder (browser download)",
+  };
 }
 
 /** Download the backup file (browser). Falls back to a shareable blob. */
@@ -290,7 +363,7 @@ export function downloadBackupFile(file: BackupFile): string {
 
 /**
  * Share the backup file via the system share sheet (Android: Drive,
- * WhatsApp, Gmail, …). Returns "shared", "downloaded" (share sheet
+ * WhatsApp, …). Returns "shared", "downloaded" (share sheet
  * unavailable — file was downloaded instead) or "copied".
  */
 export async function shareBackupFile(file: BackupFile): Promise<string> {

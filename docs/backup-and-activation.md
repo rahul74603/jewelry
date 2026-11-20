@@ -11,26 +11,38 @@ MediSmart-v2-style backup and activation, adapted for Aurum. Branch:
   `functions/src/core/model.ts`) — plus a SHA-256 checksum over
   canonical JSON (`stableJson`) and per-collection counts. See
   `src/lib/backup.ts`.
-- **Where it lives:** Settings → “Backup & restore”. Export shares the
-  file via the system share sheet or downloads it; the last 7 backups
-  are listed, with the last-backup date.
+- **Where it lives:** Settings → “Backup & restore”. **Backup now**
+  (one tap) writes the file straight to the phone’s
+  `Documents/AurumBackup/` folder — no share sheet, no picking a
+  folder. If that write fails, it falls back to the Share sheet (and
+  says so). On the web build it is a plain download.
+- **One file per year, overwritten daily.**
+  `aurum-backup-<shop>-<YYYY>.json` is the same file every day within
+  the year — each backup overwrites it in place, so there is always
+  exactly one current file and the whole shop history stays inside
+  it. A new file starts each January; old years stay listed in
+  Settings. No pile of daily files.
 - **Daily, on open — NOT at 02:00.** Like MediSmart, the check runs
   when the app opens (`src/pages/Dashboard.tsx` shows a reminder when
   today’s backup is pending; the toggle is in Settings). An exact 02:00
   backup needs a native Android WorkManager scheduler plus a
   battery-optimisation exemption. That is **not built**.
-- **Gmail / WhatsApp / Drive are manual picks, not automatic sends.**
-  Gmail cannot take an attachment via a `mailto:` link, and Google
-  Drive needs a one-time sign-in. The export opens the Share sheet (or
-  downloads the file) and the shopkeeper picks Gmail, WhatsApp or
-  Drive there. There is no background auto-upload.
-- **Restore is PREVIEW-ONLY.** Choosing a backup file validates it
-  (format, version, SHA-256 checksum, record counts) and shows a
-  preview of what it contains. Applying the restore is **not wired**:
-  it needs a new `perform("restore", workspaceData)` hook — an
-  `"restore"` Action in `functions/src/core/model.ts`, a `demoMutation`
-  case, and a server handler in `functions/src/server/workspace.ts`.
-  Until that hook exists, never claim a restore applies data.
+- **No Gmail backup.** Gmail cannot take an attachment via a `mailto:`
+  link, so Gmail is not offered. To keep a second copy, share the file
+  to WhatsApp or Google Drive yourself from the Share sheet (the
+  secondary “Share sheet” option in Settings). There is no automatic
+  Drive upload — Drive needs a one-time Google sign-in, which is **not
+  built** yet.
+- **Restore is real.** Settings → “Restore from a backup file”: pick
+  a file, it is validated first (format, version, SHA-256 checksum,
+  record counts), then one confirmation applies it —
+  `perform("restore", workspaceData)` replaces the whole workspace
+  (all 6 collections) via the `"restore"` Action in
+  `functions/src/core/model.ts`, a `demoMutation` case, and a server
+  handler in `functions/src/server/workspace.ts` (which also rebuilds
+  voided/converted flags and bumps document counters past the highest
+  restored number). A file that fails validation can never wipe the
+  shop.
 - **Shop details:** the shopkeeper enters shop details in Settings →
   “Shop profile” (the existing form). The backup includes that profile.
   No duplicate shop-details form was added.
@@ -94,9 +106,12 @@ key  = SHA256(code      | salt | KEY)    first 8 chars, uppercase
 
 ## Tests
 
-`tests/backup.test.ts` (8 tests) and `tests/offlineActivation.test.ts`
+`tests/backup.test.ts` (8 tests), `tests/restore.test.ts` (3 tests)
+and `tests/offlineActivation.test.ts`
 (9 tests): backup creation/validation, tamper rejection, daily-due
-logic, last-7 history, the 6-collection shape; code/key derivation,
+logic, one-file-per-year naming and per-year history, the
+6-collection shape; whole-workspace restore (valid backup round-trips,
+bad payloads throw, voided flags survive); code/key derivation,
 verification, wrong-key/secret rejection, timing-safe compare, the
 confirmed developer WhatsApp number, the master-app-key → user-app
 round-trip (two-app flow), and the licensed-flag helpers being safe

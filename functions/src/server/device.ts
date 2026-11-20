@@ -28,6 +28,7 @@ const actions = z.enum([
   "draft",
   "void",
   "adjust",
+  "restore",
 ]);
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const binding = z.object({ action: actions, digest: hash, deviceId: hash });
