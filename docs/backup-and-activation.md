@@ -63,7 +63,10 @@ key  = SHA256(code      | salt | KEY)    first 8 chars, uppercase
   only, never stored), Generate key, Copy. It uses the exact same
   `generateUnlockKey` as the Company console’s “Offline unlock” tab,
   so keys match the user app’s `verifyUnlockKey`. No billing, no demo
-  data, no sign-in.
+  data, no sign-in. The master APK has its own package
+  (`com.aurum.jewellery.master`, label “Aurum Master”), so it installs
+  side-by-side with the user app on one phone — the developer can test
+  the whole code → key → unlock flow on a single device.
 - **Builds** (`.github/workflows/android-phone.yml`): the same push
   builds both APKs — `aurum-phone-preview.apk` (user app, demo mode)
   and `aurum-master.apk` (master app) — and publishes both in the
