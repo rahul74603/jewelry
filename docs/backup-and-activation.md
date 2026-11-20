@@ -27,12 +27,33 @@ MediSmart-v2-style backup and activation, adapted for Aurum. Branch:
   today’s backup is pending; the toggle is in Settings). An exact 02:00
   backup needs a native Android WorkManager scheduler plus a
   battery-optimisation exemption. That is **not built**.
+- **Google Drive cloud backup (automatic).** Settings → “Google
+  Drive cloud backup” → “Connect Google Drive folder” opens the
+  Android folder picker once; the shopkeeper picks a folder in
+  Google Drive (needs the Google Drive app on the phone). After
+  that, every backup also writes the same yearly file into that
+  Drive folder (overwritten in place), and the local copy in
+  `Documents/AurumBackup/` is always kept too — so the backup
+  survives a lost, changed or reset phone. No Google sign-in, no
+  Google Cloud project, no OAuth client: the folder is picked
+  through the Storage Access Framework and the permission is kept
+  by the native `DriveFolder` plugin
+  (`android/app/src/main/java/com/aurum/jewellery/DriveFolderPlugin.java`,
+  `src/lib/cloudBackup.ts`). SAF was chosen because an Android
+  OAuth client is tied to the package name + SHA-1 signing
+  fingerprint, and CI builds are DEBUG APKs with a disposable debug
+  signing key, so no registered OAuth client could ever match them
+  (the Drive REST API fails with `UnregisteredOnApiConsole` for
+  exactly this reason). If the folder is deleted in Drive or its
+  permission is revoked, the next backup marks the cloud copy
+  pending and Settings asks to pick the folder again; the local
+  backup never fails because the cloud failed. Restore can read the
+  file back from Drive (“Restore from Google Drive”) — it goes
+  through the same validation as a local file.
 - **No Gmail backup.** Gmail cannot take an attachment via a `mailto:`
-  link, so Gmail is not offered. To keep a second copy, share the file
-  to WhatsApp or Google Drive yourself from the Share sheet (the
-  secondary “Share sheet” option in Settings). There is no automatic
-  Drive upload — Drive needs a one-time Google sign-in, which is **not
-  built** yet.
+  link, so Gmail is not offered. To keep a second copy elsewhere,
+  share the file to WhatsApp yourself from the Share sheet (the
+  secondary “Share sheet” option in Settings).
 - **Restore is real.** Settings → “Restore from a backup file”: pick
   a file, it is validated first (format, version, SHA-256 checksum,
   record counts), then one confirmation applies it —
@@ -42,7 +63,9 @@ MediSmart-v2-style backup and activation, adapted for Aurum. Branch:
   handler in `functions/src/server/workspace.ts` (which also rebuilds
   voided/converted flags and bumps document counters past the highest
   restored number). A file that fails validation can never wipe the
-  shop.
+  shop. The Drive copy restores the same way — “Restore from Google
+  Drive” downloads the yearly file from the connected folder and
+  validates it first.
 - **Shop details:** the shopkeeper enters shop details in Settings →
   “Shop profile” (the existing form). The backup includes that profile.
   No duplicate shop-details form was added.
@@ -106,12 +129,15 @@ key  = SHA256(code      | salt | KEY)    first 8 chars, uppercase
 
 ## Tests
 
-`tests/backup.test.ts` (8 tests), `tests/restore.test.ts` (3 tests)
-and `tests/offlineActivation.test.ts`
+`tests/backup.test.ts` (8 tests), `tests/restore.test.ts` (3 tests),
+`tests/cloudBackup.test.ts` (22 tests) and
+`tests/offlineActivation.test.ts`
 (9 tests): backup creation/validation, tamper rejection, daily-due
 logic, one-file-per-year naming and per-year history, the
 6-collection shape; whole-workspace restore (valid backup round-trips,
-bad payloads throw, voided flags survive); code/key derivation,
+bad payloads throw, voided flags survive); cloud backup (folder pick,
+yearly-file upload, pending/retry on failure, permission-lost
+handling, restore from Drive, disconnect); code/key derivation,
 verification, wrong-key/secret rejection, timing-safe compare, the
 confirmed developer WhatsApp number, the master-app-key → user-app
 round-trip (two-app flow), and the licensed-flag helpers being safe

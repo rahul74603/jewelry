@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Save,
@@ -16,6 +16,9 @@ import {
   SlidersHorizontal,
   Image as ImageIcon,
   ArrowRight,
+  Cloud,
+  CloudOff,
+  CloudDownload,
 } from "lucide-react";
 import { useShop, useToast } from "../lib/store";
 import { rupee, cash, err, day } from "../lib/format";
@@ -41,6 +44,7 @@ import {
   parseBackup,
   shareBackupFile,
   downloadBackupToDevice,
+  backupFilename,
   loadLastBackupAt,
   loadBackupHistory,
   loadBackupPreferences,
@@ -52,6 +56,19 @@ import {
   type BackupPreferences,
   type BackupDestination,
 } from "../lib/backup";
+import {
+  isCloudSupported,
+  loadCloudFolder,
+  loadLastCloudBackupAt,
+  pickCloudFolder,
+  uploadBackupToCloud,
+  downloadBackupFromCloud,
+  verifyCloudFolder,
+  disconnectCloudFolder,
+  getCloudStatus,
+  type CloudFolder,
+  type CloudStatus,
+} from "../lib/cloudBackup";
 import {
   accountDocuments,
   allocations,
@@ -287,11 +304,16 @@ async function readLogo(file: File): Promise<string> {
 /**
  * Backup & Restore (Settings). One tap saves the shop's whole data as
  * a single yearly file (Documents/AurumBackup/aurum-backup-<shop>-<YYYY>.json),
- * overwritten in place every day. Restore picks a file, validates it
+ * overwritten in place every day — and, once a Google Drive folder is
+ * picked, the same file is also written into that Drive folder, so the
+ * backup survives a lost or reset phone. Restore picks a file, validates it
  * (format, version, SHA-256 checksum, counts), asks once, then applies
- * it with perform("restore") — the whole workspace is replaced.
- * No Gmail backup; WhatsApp / Drive are manual picks on the Share
- * sheet, and there is no automatic Drive upload.
+ * it with perform("restore") — the whole workspace is replaced. The
+ * Drive file can be restored the same way. No Gmail backup; WhatsApp
+ * is a manual pick on the Share sheet. The Drive folder is picked
+ * once through the Android folder picker (Storage Access Framework) —
+ * no Google sign-in, no OAuth client — and the permission is kept by
+ * the native DriveFolder plugin (see src/lib/cloudBackup.ts).
  */
 function BackupRestoreSection() {
   const { data, perform } = useShop(),
@@ -308,33 +330,134 @@ function BackupRestoreSection() {
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [preview, setPreview] = useState<BackupFile | null>(null),
-    [confirmRestore, setConfirmRestore] = useState(false);
+    [confirmRestore, setConfirmRestore] = useState(false),
+    [cloudFolder, setCloudFolder] = useState<CloudFolder | null>(() =>
+      loadCloudFolder(),
+    ),
+    [cloudStatus, setCloudStatus] = useState<CloudStatus>(
+      () => getCloudStatus().status,
+    ),
+    [lastCloud, setLastCloud] = useState<string | null>(() =>
+      loadLastCloudBackupAt(),
+    );
+  const refreshCloudState = () => {
+    const s = getCloudStatus();
+    setCloudFolder(s.folder);
+    setCloudStatus(s.status);
+    setLastCloud(s.lastCloudAt);
+  };
+  // On opening Settings, check the Drive folder is still reachable —
+  // the user may have deleted it or revoked access in the meantime.
+  useEffect(() => {
+    if (!loadCloudFolder()) return;
+    void (async () => {
+      await verifyCloudFolder();
+      refreshCloudState();
+    })();
+  }, []);
   const doExport = async () => {
     setBusy(true);
     setError("");
     try {
       const file = await createBackup(data);
+      let toast: string;
       if (prefs.destination === "share") {
         const how = await shareBackupFile(file);
-        setHistory(markBackupDone(file));
-        setLastBackup(file.createdAt);
-        notify(
+        toast =
           how === "shared"
             ? "Backup shared — pick WhatsApp or Drive from the share sheet."
-            : "Backup downloaded.",
-        );
-        return;
+            : "Backup downloaded.";
+      } else {
+        const saved = await downloadBackupToDevice(file);
+        toast =
+          saved.method === "device-folder"
+            ? `Backup saved — ${saved.location}. Same file, updated every day.`
+            : saved.method === "shared"
+              ? "Could not write to the AurumBackup folder — backup shared instead. Pick WhatsApp or Drive from the share sheet."
+              : "Could not write to the AurumBackup folder — backup downloaded instead.";
       }
-      const saved = await downloadBackupToDevice(file);
       setHistory(markBackupDone(file));
       setLastBackup(file.createdAt);
+      // The Drive copy is a second save, never a replacement: the
+      // local backup above already happened, and a cloud failure only
+      // adds a note (and retries with the next backup).
+      const cloud = await uploadBackupToCloud(file);
+      refreshCloudState();
+      if (cloud.uploaded) toast += " Also saved to Google Drive.";
+      else if (cloud.reason === "permission-lost")
+        toast +=
+          " Google Drive folder permission lost — pick the folder again below. Local copy is safe.";
+      else if (cloud.reason === "folder-missing")
+        toast +=
+          " Google Drive folder is gone — pick a folder again below. Local copy is safe.";
+      else if (cloud.reason === "failed")
+        toast +=
+          " Google Drive upload failed — will retry with the next backup. Local copy is safe.";
+      notify(toast);
+    } catch (e) {
+      setError(err(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const connectCloud = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const folder = await pickCloudFolder();
+      if (!folder) return; // User cancelled the picker.
+      refreshCloudState();
       notify(
-        saved.method === "device-folder"
-          ? `Backup saved — ${saved.location}. Same file, updated every day.`
-          : saved.method === "shared"
-            ? "Could not write to the AurumBackup folder — backup shared instead. Pick WhatsApp or Drive from the share sheet."
-            : "Could not write to the AurumBackup folder — backup downloaded instead.",
+        `Google Drive folder connected — ${folder.name}. Every backup will also be saved there.`,
       );
+    } catch (e) {
+      setError(err(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const disconnectCloud = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await disconnectCloudFolder();
+      refreshCloudState();
+      notify("Google Drive folder disconnected. Backups stay on this phone only.");
+    } catch (e) {
+      setError(err(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const restoreFromDrive = async () => {
+    setBusy(true);
+    setError("");
+    setPreview(null);
+    try {
+      const filename = backupFilename(data.profile.shopName, new Date());
+      const got = await downloadBackupFromCloud(filename);
+      if (!got.found) {
+        if (got.reason === "not-found")
+          setError(
+            "No backup file in the Google Drive folder yet — back up first.",
+          );
+        else if (got.reason === "permission-lost") {
+          setError(
+            "Google Drive folder permission lost — pick the folder again.",
+          );
+          refreshCloudState();
+        } else
+          setError(
+            "Could not read the backup from Google Drive — check the connection and try again.",
+          );
+        return;
+      }
+      const result = await parseBackup(got.text);
+      if (!result.valid) {
+        setError(result.errors.join(" "));
+        return;
+      }
+      setPreview(result.file);
     } catch (e) {
       setError(err(e));
     } finally {
@@ -377,8 +500,9 @@ function BackupRestoreSection() {
         Backup runs daily when you open the app — not at a fixed 2am,
         which needs a native Android scheduler (not built yet). Your shop
         details live in “Shop profile” above; the backup includes them.
-        No Gmail backup — to keep a copy elsewhere, share the file to
-        WhatsApp or Drive yourself from the share sheet.
+        No Gmail backup. Connect a Google Drive folder below and the same
+        file is also saved there automatically, so your data survives a
+        lost or reset phone.
       </p>
       <div className="form-grid">
         <label className="check-line full">
@@ -436,6 +560,69 @@ function BackupRestoreSection() {
           ))}
         </ul>
       )}
+      <h3 className="spaced">Google Drive cloud backup</h3>
+      <p className="muted">
+        Pick a folder in Google Drive once — every backup is then also
+        saved to that folder automatically (the same yearly file,
+        overwritten in place), so your data survives a lost, changed or
+        reset phone. The copy on this phone is always kept too. No Google
+        sign-in and no account needed: the folder is picked in the
+        Android file picker (needs the Google Drive app on this phone).
+        If the folder is deleted in Drive or its permission is revoked,
+        the app will ask you to pick it again.
+      </p>
+      {!isCloudSupported() && (
+        <p className="muted">
+          Cloud folder backup works in the Android app — it is not
+          available in the web build.
+        </p>
+      )}
+      <p className="muted">
+        Drive:{" "}
+        {cloudFolder ? (
+          <>
+            <Cloud size={13} /> {cloudFolder.name}
+            {lastCloud
+              ? ` · last cloud backup ${day(new Date(lastCloud).getTime())}`
+              : " · no cloud backup yet"}
+            {cloudStatus === "pending"
+              ? " · upload pending — will retry with the next backup"
+              : ""}
+            {cloudStatus === "permission-lost"
+              ? " · permission lost — pick the folder again"
+              : ""}
+          </>
+        ) : (
+          <>
+            <CloudOff size={13} /> not connected
+          </>
+        )}
+      </p>
+      <div className="settings-actions">
+        <span>
+          {cloudFolder
+            ? "One-time setup — after this, no further setup is needed."
+            : "Pick once, then every backup goes to Drive on its own."}
+        </span>
+        <button
+          className="btn outline"
+          disabled={busy || !isCloudSupported()}
+          onClick={() => void connectCloud()}
+        >
+          <Cloud size={15} />
+          {cloudFolder ? "Change Drive folder" : "Connect Google Drive folder"}
+        </button>
+        {cloudFolder && (
+          <button
+            className="btn outline"
+            disabled={busy}
+            onClick={() => void disconnectCloud()}
+          >
+            <CloudOff size={15} />
+            Disconnect
+          </button>
+        )}
+      </div>
       <h3 className="spaced">Restore from a backup file</h3>
       <p className="muted">
         Choose a backup file from this phone (or one received on WhatsApp /
@@ -467,6 +654,16 @@ function BackupRestoreSection() {
           }}
         />
       </label>
+      {cloudFolder && (
+        <button
+          className="btn outline"
+          disabled={busy}
+          onClick={() => void restoreFromDrive()}
+        >
+          <CloudDownload size={15} />
+          Restore from Google Drive
+        </button>
+      )}
       {preview && (
         <div className="info-box">
           <ShieldCheck size={20} />

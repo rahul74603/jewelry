@@ -372,9 +372,10 @@ export default function Dashboard() {
             <p>
               Today’s backup hasn’t been made yet.{" "}
               <Link to="/settings">Back up now in Settings</Link> — one tap
-              saves it to the AurumBackup folder on this phone, so your data
-              survives a lost phone. Share the file to WhatsApp or Drive
-              yourself for a second copy.
+              saves it to the AurumBackup folder on this phone and to your
+              connected Google Drive folder, so your data survives a lost
+              phone. Connect a Drive folder once in Settings → Backup
+              &amp; restore.
             </p>
           </div>
         </section>
