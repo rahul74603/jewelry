@@ -3,7 +3,15 @@
 const { test, before, after, afterEach } = require("node:test");
 const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
+const { createHash } = require("node:crypto");
 const fs = require("node:fs");
+// The master secret the shipped demo APK was built with. This must match
+// MASTER_SECRET_PLACEHOLDER in src/lib/offlineActivation.ts. The emulator
+// test plays the developer's master app: it reads this device's code from
+// the activation gate and generates the unlock key with the same
+// SHA-256 scheme (key = SHA256(code|secret|KEY), first 8 chars, upper).
+// It is a public placeholder in this repo, never a real secret.
+const MASTER_SECRET = "CHANGE-ME-BEFORE-DISTRIBUTION";
 const pkg = "com.aurum.jewellery.preview",
   out = "test-results/phone";
 const shell = (...args) =>
@@ -123,6 +131,36 @@ async function attach() {
     }
   });
   console.log("WebView:", await evaluate("navigator.userAgent"));
+  await unlockIfNeeded();
+}
+// The app opens behind the full-screen activation gate until this device
+// is unlocked. Drive the real unlock flow: read the device code from the
+// gate, generate the key exactly as the master app does, enter it, and
+// verify. The verification, the license flag and the Dashboard mount all
+// run for real in the app — only the developer's key generation is done
+// test-side, as the master app would do it. If the device is already
+// licensed (re-attach after a failed test), the Dashboard is already
+// mounted and there is nothing to unlock.
+async function unlockIfNeeded() {
+  const state = await until("activation gate or Dashboard", () =>
+    evaluate(
+      `(()=>{if(document.querySelector('[data-shop-home]'))return 'home';const c=document.querySelector('.code-box')?.innerText.trim();return c&&c!=='Loading device code…'&&/^[0-9A-F]{8}$/.test(c)?c:false;})()`,
+    ),
+    25000,
+  );
+  if (state === "home") return;
+  const key = createHash("sha256")
+    .update(`${state}|${MASTER_SECRET}|KEY`)
+    .digest("hex")
+    .slice(0, 8)
+    .toUpperCase();
+  console.log("Unlocking device code", state);
+  await until("enter unlock key", () =>
+    evaluate(
+      `(()=>{const i=document.querySelector('.auth-form input');if(!i)return false;const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;set.call(i,${JSON.stringify(key)});i.dispatchEvent(new Event('input',{bubbles:true}));return i.value===${JSON.stringify(key)};})()`,
+    ),
+  );
+  await btn("Verify unlock key");
   await until(
     "mounted Dashboard",
     () => evaluate('!!document.querySelector("[data-shop-home]")'),
