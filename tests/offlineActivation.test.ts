@@ -5,6 +5,9 @@ import {
   generateUnlockKey,
   verifyUnlockKey,
   verifyKeyForInstallId,
+  isOfflineLicensed,
+  markOfflineLicensed,
+  clearOfflineLicense,
   timingSafeEqual,
   developerWhatsAppLink,
   DEVELOPER_WHATSAPP,
@@ -49,6 +52,26 @@ describe("offline activation (MediSmart v2 scheme)", () => {
     await expect(generateUnlockKey("too-short", SECRET)).rejects.toThrow(
       "8-character device code",
     );
+  });
+
+  it("master app key unlocks the user app (two-app flow)", async () => {
+    // User app: the full-screen gate shows this device's code.
+    const code = await codeForInstallId(INSTALL_ID, SECRET);
+    // Master app: the developer pastes the code and generates the key
+    // with the exact function the Master screen uses.
+    const key = await generateUnlockKey(code, SECRET);
+    // User app: the key verifies against the same code and install id.
+    expect(await verifyUnlockKey(code, key, SECRET)).toBe(true);
+    expect(await verifyKeyForInstallId(INSTALL_ID, key, SECRET)).toBe(true);
+    // The same key does NOT unlock a different device's code.
+    const otherCode = await codeForInstallId("another-install", SECRET);
+    expect(await verifyUnlockKey(otherCode, key, SECRET)).toBe(false);
+  });
+
+  it("licensed flag helpers are safe without browser storage", () => {
+    expect(isOfflineLicensed()).toBe(false);
+    expect(() => markOfflineLicensed()).not.toThrow();
+    expect(() => clearOfflineLicense()).not.toThrow();
   });
 
   it("compares keys in a timing-safe way", () => {
