@@ -68,9 +68,10 @@ key  = SHA256(code      | salt | KEY)    first 8 chars, uppercase
   side-by-side with the user app on one phone — the developer can test
   the whole code → key → unlock flow on a single device.
 - **Builds** (`.github/workflows/android-phone.yml`): the same push
-  builds both APKs — `aurum-phone-preview.apk` (user app, demo mode)
-  and `aurum-master.apk` (master app) — and publishes both in the
-  same prerelease.
+  builds three APKs — `Aurum-Customer-arm64.apk` and
+  `Aurum-Customer-armeabi.apk` (user app, demo mode) and
+  `Aurum-Master-arm64.apk` (master app, arm64 only — the developer
+  has the latest phone) — and publishes them in the same prerelease.
 - **Install id** (`src/lib/offlineActivation.ts` `getInstallId()`):
   prefers Aurum’s existing device fingerprint — SHA-256 of the P-256
   public key (Android Keystore on device, IndexedDB in the browser;
