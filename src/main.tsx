@@ -1,13 +1,28 @@
-import React, { lazy, Suspense } from "react";
+import React, { lazy, Suspense, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createHashRouter, RouterProvider } from "react-router-dom";
 import { BackNavigation } from "./components/BackNavigation";
+import ActivationGate from "./components/ActivationGate";
 import { Feedback } from "./lib/store";
+import { isOfflineLicensed } from "./lib/offlineActivation";
 import "./styles.css";
+const MODE = import.meta.env.VITE_APP_MODE;
 const Root =
-  import.meta.env.VITE_APP_MODE === "live"
+  MODE === "live"
     ? lazy(() => import("./Live"))
-    : lazy(() => import("./Demo"));
+    : MODE === "master"
+      ? lazy(() => import("./Master"))
+      : lazy(() => import("./Demo"));
+/**
+ * User modes (demo + live) open behind the full-screen offline
+ * activation lock until this device is unlocked — MediSmart-style.
+ * Master mode has no lock: it IS the developer's key tool.
+ */
+function GatedRoot() {
+  const [unlocked, setUnlocked] = useState(() => isOfflineLicensed());
+  if (MODE === "master" || unlocked) return <Root />;
+  return <ActivationGate onUnlocked={() => setUnlocked(true)} />;
+}
 class Boundary extends React.Component<
   { children: React.ReactNode },
   { failed: boolean }
@@ -44,7 +59,7 @@ const router = createHashRouter([
               </div>
             }
           >
-            <Root />
+            <GatedRoot />
           </Suspense>
         </BackNavigation>
       </Feedback>

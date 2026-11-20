@@ -35,7 +35,7 @@ MediSmart-v2-style backup and activation, adapted for Aurum. Branch:
   “Shop profile” (the existing form). The backup includes that profile.
   No duplicate shop-details form was added.
 
-## Offline activation (MediSmart v2)
+## Offline activation (MediSmart v2) — full-screen lock + separate master app
 
 MediSmart v2 (`lib/services/license_service.dart`) uses a **per-install
 UUID** in SharedPreferences — **not a MAC address** (Android MACs are
@@ -47,20 +47,33 @@ code = SHA256(installId | salt | CODE)   first 8 chars, uppercase
 key  = SHA256(code      | salt | KEY)    first 8 chars, uppercase
 ```
 
-- **Shopkeeper side** (`src/Live.tsx`, activation screen): the device
-  code is shown, “Send this code to developer on WhatsApp” opens
-  `wa.me/916263396446` with the code prefilled (developer number
-  confirmed by Ajay: **+91 6263396446**), and the unlock key the
-  developer sends back is verified with a timing-safe compare.
+- **User app — full-screen lock** (`src/components/ActivationGate.tsx`,
+  wired at the app root in `src/main.tsx`): on first launch the app
+  opens BEHIND NOTHING — only the activation screen shows, in both
+  demo and live modes. Big device code, “Send this code to developer
+  on WhatsApp” (opens `wa.me/916263396446` with the code prefilled —
+  developer number confirmed by Ajay: **+91 6263396446**), 8-character
+  key input + Verify. Until the correct key is entered, the app does
+  not open. On success the device is marked licensed locally and the
+  app opens directly on later launches. Reinstall / cleared storage
+  means a new code and re-activation, exactly like MediSmart.
+- **Master app — separate build** (`src/Master.tsx`,
+  `VITE_APP_MODE=master`): renders ONLY the key tool — paste the
+  shopkeeper’s device code, enter the master secret (kept in memory
+  only, never stored), Generate key, Copy. It uses the exact same
+  `generateUnlockKey` as the Company console’s “Offline unlock” tab,
+  so keys match the user app’s `verifyUnlockKey`. No billing, no demo
+  data, no sign-in.
+- **Builds** (`.github/workflows/android-phone.yml`): the same push
+  builds both APKs — `aurum-phone-preview.apk` (user app, demo mode)
+  and `aurum-master.apk` (master app) — and publishes both in the
+  same prerelease.
 - **Install id** (`src/lib/offlineActivation.ts` `getInstallId()`):
   prefers Aurum’s existing device fingerprint — SHA-256 of the P-256
   public key (Android Keystore on device, IndexedDB in the browser;
   `src/lib/device.ts` `deviceIdentity`) — with a locally stored UUID
-  fallback when no signed-in uid / keystore is available.
-- **Master side** (`src/pages/Company.tsx` → “Offline unlock” tab,
-  company admins only): paste the shopkeeper’s device code, enter the
-  master secret (kept in memory only, never stored), generate the key,
-  copy it and send it back on WhatsApp.
+  fallback when no signed-in uid / keystore is available. The root
+  gate runs before any sign-in, so it uses the stored-UUID install id.
 - **The offline key unlocks the device LOCALLY only.** It does not
   grant the live server workspace — live billing still needs internet
   verification (`LicensedShop` in `src/Live.tsx`).
@@ -78,7 +91,9 @@ key  = SHA256(code      | salt | KEY)    first 8 chars, uppercase
 ## Tests
 
 `tests/backup.test.ts` (8 tests) and `tests/offlineActivation.test.ts`
-(7 tests): backup creation/validation, tamper rejection, daily-due
+(9 tests): backup creation/validation, tamper rejection, daily-due
 logic, last-7 history, the 6-collection shape; code/key derivation,
-verification, wrong-key/secret rejection, timing-safe compare, and the
-confirmed developer WhatsApp number.
+verification, wrong-key/secret rejection, timing-safe compare, the
+confirmed developer WhatsApp number, the master-app-key → user-app
+round-trip (two-app flow), and the licensed-flag helpers being safe
+without browser storage.

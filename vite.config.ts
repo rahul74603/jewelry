@@ -2,8 +2,8 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 export default defineConfig(({ mode }) => {
   const env = { ...loadEnv(mode, process.cwd(), "VITE_"), ...process.env };
-  if (env.VITE_APP_MODE && !["live", "demo"].includes(env.VITE_APP_MODE))
-    throw Error("VITE_APP_MODE must be demo or live");
+  if (env.VITE_APP_MODE && !["live", "demo", "master"].includes(env.VITE_APP_MODE))
+    throw Error("VITE_APP_MODE must be demo, live or master");
   if (env.VITE_APP_MODE === "live")
     for (const field of [
       "FIREBASE_API_KEY",

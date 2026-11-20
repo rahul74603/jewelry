@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 mkdir -p test-results/phone
-adb install -r phone/aurum-phone-preview.apk
+# The emulator is x86_64, so install the x86_64 split (built for the
+# emulator test only, never published as a release asset).
+adb install -r phone/Aurum-Customer-x86_64.apk
 set +e
 node --test tests/android/phone.cjs 2>&1 | tee test-results/phone/results.tap
 result=${PIPESTATUS[0]}
