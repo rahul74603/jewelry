@@ -159,6 +159,9 @@ export const invoiceSchema = z.object({
     .string()
     .regex(/^\d{2}$/)
     .optional(),
+  // Manual GST % chosen on the Billing screen (5/10/15/20). When set, it
+  // drives the whole bill's tax and no per-HSN tax rule is needed.
+  gstPercent: z.number().min(0).max(100).multipleOf(0.01).optional(),
   advanceFor: z.string().trim().min(1).max(240).optional(),
   sourceEstimate: id.optional(),
 });

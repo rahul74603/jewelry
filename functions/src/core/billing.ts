@@ -6,12 +6,26 @@ import {
   type InvoiceInput,
   type FinalizeInput,
   type BillLine,
+  type Profile,
   type Workspace,
   type Rate,
 } from "./model";
 const D = (n: Decimal.Value) => new Decimal(n);
 export const paise = (r: Decimal.Value) =>
   D(r).times(100).toDecimalPlaces(0, Decimal.ROUND_HALF_UP).toNumber();
+/** GST % choices offered on the Billing screen. */
+export const GST_PERCENT_OPTIONS = [5, 10, 15, 20] as const;
+/** Default GST % for a new GST invoice: the shop's latest tax-rule percent
+ * when it is one of the offered choices, otherwise 5%. */
+export function defaultGstPercent(profile: Pick<Profile, "taxes">): number {
+  const latest = [...profile.taxes].sort((a, b) =>
+    b.effective.localeCompare(a.effective),
+  )[0];
+  return latest &&
+    (GST_PERCENT_OPTIONS as readonly number[]).includes(latest.percent)
+    ? latest.percent
+    : 5;
+}
 // A legacy draft has no selection: keep its exact recorded amount, including zero.
 export function paymentSelection(
   input: Pick<InvoiceInput, "settlement" | "paid">,
@@ -128,9 +142,15 @@ export function calculateInvoice(
     const rule = profile.taxes
       .filter((t) => t.hsn === p.hsn && t.effective <= indiaDay(issuedAt))
       .sort((a, b) => b.effective.localeCompare(a.effective))[0];
-    if (input.type === "GST invoice" && !rule)
+    // A manually chosen GST % replaces the per-HSN rule for the whole bill.
+    if (
+      input.type === "GST invoice" &&
+      input.gstPercent === undefined &&
+      !rule
+    )
       throw Error(`No effective GST rule for HSN ${p.hsn || "(missing)"}.`);
-    const taxPercent = input.type === "GST invoice" ? rule!.percent : 0,
+    const taxPercent =
+        input.type === "GST invoice" ? (input.gstPercent ?? rule!.percent) : 0,
       components =
         input.type === "GST invoice" && input.placeOfSupply
           ? taxComponents(

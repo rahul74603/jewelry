@@ -59,10 +59,14 @@ export function taxComponents(
     throw Error("Unsupported supplier state or place of supply.");
   const levy = new Decimal(taxablePaise).mul(rate).div(100);
   if (origin !== place) return { IGST: levy.round().toNumber() };
-  const half = levy.div(2).round().toNumber();
+  // Split the rounded levy in two; the odd paise goes to SGST/UTGST so the
+  // parts always add up to the tax charged on the bill.
+  const total = levy.round().toNumber(),
+    cgst = Math.floor(total / 2);
   return {
-    CGST: half,
-    [["04", "26", "31", "35", "38"].includes(place) ? "UTGST" : "SGST"]: half,
+    CGST: cgst,
+    [["04", "26", "31", "35", "38"].includes(place) ? "UTGST" : "SGST"]:
+      total - cgst,
   };
 }
 export type Allocation = { mode: TenderMode; amountPaise: number };

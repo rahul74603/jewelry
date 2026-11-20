@@ -126,7 +126,7 @@ describe("Issue-time document evidence", () => {
     ).toThrow(/place of supply/);
     expect(() => taxComponents("23ABCDE1234F1Z5", "99", 100, 3)).toThrow();
     expect(taxComponents("04ABCDE1234F1Z5", "04", 101, 3)).toEqual({
-      CGST: 2,
+      CGST: 1,
       UTGST: 2,
     });
   });
