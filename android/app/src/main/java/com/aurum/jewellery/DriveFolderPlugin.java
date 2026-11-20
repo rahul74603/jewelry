@@ -137,21 +137,51 @@ public class DriveFolderPlugin extends Plugin {
     }
 
     /**
-     * The root document of the Google Drive DocumentsProvider, found
-     * by querying its roots (the documented way to discover them).
-     * Returns null when Drive is not installed / unavailable.
+     * The "My Drive" folder of the Google Drive DocumentsProvider, as
+     * a tree URI the folder picker can open directly.
+     *
+     * Two things the first version got wrong: it took the FIRST root
+     * row (Drive lists several roots — My Drive, Shared with me,
+     * Recent, ... — and the first one need not be My Drive, so the
+     * picker ignored the bad initial URI and opened local storage),
+     * and it built a document URI where the folder picker wants a
+     * tree URI. Now the "My Drive" root is picked explicitly — by
+     * document id "root" or title, falling back to the first root —
+     * and the initial URI is a tree URI. Returns null when Drive is
+     * not installed / unreachable.
      */
     private Uri driveRootUri() {
         try (Cursor c = getContext().getContentResolver().query(
                 DocumentsContract.buildRootsUri("com.google.android.apps.docs.storage"),
-                new String[]{DocumentsContract.Root.COLUMN_DOCUMENT_ID},
+                new String[]{
+                    DocumentsContract.Root.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Root.COLUMN_TITLE,
+                    DocumentsContract.Root.COLUMN_ROOT_ID},
                 null, null, null)) {
-            if (c != null && c.moveToFirst()) {
-                String docId = c.getString(0);
-                if (docId != null && !docId.isEmpty()) {
-                    return DocumentsContract.buildDocumentUri(
+            if (c == null) return null;
+            int docIdCol = c.getColumnIndex(
+                DocumentsContract.Root.COLUMN_DOCUMENT_ID);
+            int titleCol = c.getColumnIndex(
+                DocumentsContract.Root.COLUMN_TITLE);
+            int rootIdCol = c.getColumnIndex(
+                DocumentsContract.Root.COLUMN_ROOT_ID);
+            String firstDocId = null;
+            while (c.moveToNext()) {
+                String docId = docIdCol >= 0 ? c.getString(docIdCol) : null;
+                if (docId == null || docId.isEmpty()) continue;
+                if (firstDocId == null) firstDocId = docId;
+                String title = titleCol >= 0 ? c.getString(titleCol) : null;
+                String rootId = rootIdCol >= 0 ? c.getString(rootIdCol) : null;
+                if ("root".equals(docId) || "root".equals(rootId)
+                        || (title != null
+                            && "My Drive".equalsIgnoreCase(title))) {
+                    return DocumentsContract.buildTreeDocumentUri(
                         "com.google.android.apps.docs.storage", docId);
                 }
+            }
+            if (firstDocId != null) {
+                return DocumentsContract.buildTreeDocumentUri(
+                    "com.google.android.apps.docs.storage", firstDocId);
             }
         } catch (Exception ignored) {
         }
