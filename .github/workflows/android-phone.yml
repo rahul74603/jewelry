@@ -43,15 +43,17 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - run: npm ci && npm test && npm run build
       - run: npx --no-install cap sync android
-      - name: Package debug-signed ARM / x86 compatible preview
+      - name: Package split debug APKs (arm64 + armeabi + x86_64)
         working-directory: android
         run: ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug
-      - name: Prepare downloadable files
+      - name: Prepare split APKs (arm64 + armeabi publish, x86_64 emulator only)
         run: |
           mkdir -p phone
-          cp android/app/build/outputs/apk/debug/app-debug.apk phone/aurum-phone-preview.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose phone/aurum-phone-preview.apk
-          cd phone && sha256sum aurum-phone-preview.apk > SHA256SUMS.txt
+          cp android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk phone/Aurum-Customer-arm64.apk
+          cp android/app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk phone/Aurum-Customer-armeabi.apk
+          cp android/app/build/outputs/apk/debug/app-x86_64-debug.apk phone/Aurum-Customer-x86_64.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose phone/Aurum-Customer-arm64.apk phone/Aurum-Customer-armeabi.apk phone/Aurum-Customer-x86_64.apk
+          cd phone && sha256sum Aurum-Customer-arm64.apk Aurum-Customer-armeabi.apk > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: aurum-phone-preview
@@ -59,9 +61,49 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  master:
+    name: Build installable master APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      VITE_APP_MODE: master
+    steps:
+      - uses: actions/checkout@v5
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v5
+        with: { node-version: "22", cache: npm }
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: "21" }
+      - name: Check hosted Android SDK
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_HOME"
+          if [[ ! -f "$ANDROID_HOME/platforms/android-35/android.jar" || ! -x "$ANDROID_HOME/build-tools/35.0.0/apksigner" ]]; then
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0'
+          fi
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci && npm test && npm run build
+      - run: npx --no-install cap sync android
+      - name: Package split debug APKs (arm64 + armeabi + x86_64)
+        working-directory: android
+        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug
+      - name: Prepare split master APKs (arm64 + armeabi publish, x86_64 not published)
+        run: |
+          mkdir -p master
+          cp android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk master/Aurum-Master-arm64.apk
+          cp android/app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk master/Aurum-Master-armeabi.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose master/Aurum-Master-arm64.apk master/Aurum-Master-armeabi.apk
+          cd master && sha256sum Aurum-Master-arm64.apk Aurum-Master-armeabi.apk > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aurum-master
+          path: master/
+          if-no-files-found: error
+          retention-days: 14
+
   publish:
     name: Publish direct phone download
-    needs: apk
+    needs: [apk, master]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -69,6 +111,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { name: aurum-phone-preview, path: phone }
+      - uses: actions/download-artifact@v4
+        with: { name: aurum-master, path: master }
       - name: Create prerelease and tappable APK link
         env:
           GH_TOKEN: ${{ github.token }}
@@ -78,13 +122,17 @@ jobs:
           TAG: phone-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          gh release create "$TAG" phone/aurum-phone-preview.apk phone/SHA256SUMS.txt \
+          cat phone/SHA256SUMS.txt master/SHA256SUMS.txt > SHA256SUMS.txt
+          gh release create "$TAG" phone/Aurum-Customer-arm64.apk phone/Aurum-Customer-armeabi.apk master/Aurum-Master-arm64.apk master/Aurum-Master-armeabi.apk SHA256SUMS.txt \
             --repo "$REPO" --target "$SHA" --prerelease \
             --title "Aurum · Android phone preview #$GITHUB_RUN_NUMBER" \
-            --notes 'Phone test only. Download aurum-phone-preview.apk (not Source code). Sample data resets on reload. No production account or signing secret is included. Each hosted runner uses a disposable debug signing key; uninstall the previous preview if Android rejects an update.'
+            --notes 'Phone test only. User app: Aurum-Customer-arm64.apk (latest phones) or Aurum-Customer-armeabi.apk (older/medium phones). Master app (developer only): Aurum-Master-arm64.apk or Aurum-Master-armeabi.apk. The x86_64 split is built for the emulator test only and is not published. Sample data resets on reload. No production account or signing secret is included. Each hosted runner uses a disposable debug signing key; uninstall the previous preview if Android rejects an update.'
           {
-            echo '## Your phone build is ready'
-            echo "**[⬇ Download Android APK]($SERVER/$REPO/releases/download/$TAG/aurum-phone-preview.apk)**"
+            echo '## Your phone builds are ready'
+            echo "**[⬇ Download user APK (latest phones, arm64)]($SERVER/$REPO/releases/download/$TAG/Aurum-Customer-arm64.apk)**"
+            echo "**[⬇ Download user APK (older phones, armeabi)]($SERVER/$REPO/releases/download/$TAG/Aurum-Customer-armeabi.apk)**"
+            echo "**[⬇ Download master APK (latest phones, arm64)]($SERVER/$REPO/releases/download/$TAG/Aurum-Master-arm64.apk)**"
+            echo "**[⬇ Download master APK (older phones, armeabi)]($SERVER/$REPO/releases/download/$TAG/Aurum-Master-armeabi.apk)**"
             echo ''
             echo 'फोन पर लिंक टैप करें → डाउनलोड हुई APK खोलें → Android की अनुमति देखकर Install दबाएँ।'
             echo ''
