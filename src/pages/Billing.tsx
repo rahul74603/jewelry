@@ -43,6 +43,8 @@ import {
   paymentSelection,
   paymentStatus,
   currentRates,
+  defaultGstPercent,
+  GST_PERCENT_OPTIONS,
 } from "../../functions/src/core/billing";
 import { InvoiceReceipt } from "../components/InvoiceReceipt";
 import {
@@ -227,6 +229,13 @@ export function InvoiceEditor() {
       "items",
       invoice.items.map((i, k) => (k === n ? { ...i, ...v } : i)),
     );
+  // Drafts saved before the manual GST % existed have no gstPercent; treat
+  // them with the same default the selector displays, so preview and the
+  // saved bill always agree on the rate.
+  const effectiveInvoice =
+    invoice.type === "GST invoice" && invoice.gstPercent === undefined
+      ? { ...invoice, gstPercent: defaultGstPercent(data.profile) }
+      : invoice;
   const preview = useMemo(() => {
     if (
       advance
@@ -239,7 +248,7 @@ export function InvoiceEditor() {
         b: calculateInvoice(
           data,
           {
-            ...invoice,
+            ...effectiveInvoice,
             paid: advance ? invoice.paid : 0,
             mode: "Cash",
             tenders: undefined,
@@ -294,7 +303,7 @@ export function InvoiceEditor() {
     });
   const paymentInput = () => {
     const input = draftSchema.parse({
-      ...invoice,
+      ...effectiveInvoice,
       settlement,
       ...(advance ? { settlement: "full" } : {}),
     });
@@ -415,7 +424,16 @@ export function InvoiceEditor() {
                           mode: s.mode === "Split" ? "Cash" : s.mode,
                         };
                       }
-                      return { ...s, type };
+                      return {
+                        ...s,
+                        type,
+                        // New GST invoices start with the shop's usual %;
+                        // the selector below can change it per bill.
+                        ...(type === "GST invoice" &&
+                        s.gstPercent === undefined
+                          ? { gstPercent: defaultGstPercent(data.profile) }
+                          : {}),
+                      };
                     });
                     E("");
                   }}
@@ -448,6 +466,22 @@ export function InvoiceEditor() {
                           {name} ({code})
                         </option>
                       ))}
+                  </Select>
+                </Field>
+              )}
+              {invoice.type === "GST invoice" && (
+                <Field label="GST %">
+                  <Select
+                    value={
+                      invoice.gstPercent ?? defaultGstPercent(data.profile)
+                    }
+                    onChange={(e) => change("gstPercent", +e.target.value)}
+                  >
+                    {GST_PERCENT_OPTIONS.map((p) => (
+                      <option key={p} value={p}>
+                        {p}%
+                      </option>
+                    ))}
                   </Select>
                 </Field>
               )}
@@ -651,7 +685,12 @@ export function InvoiceEditor() {
               </dd>
               {invoice.type === "GST invoice" && (
                 <>
-                  <dt>GST</dt>
+                  <dt>
+                    GST
+                    {preview.b?.lines[0]
+                      ? ` (${preview.b.lines[0].taxPercent}%)`
+                      : ""}
+                  </dt>
                   <dd>{rupee(preview.b?.taxPaise ?? 0, 2)}</dd>
                 </>
               )}
