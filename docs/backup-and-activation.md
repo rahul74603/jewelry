@@ -131,15 +131,26 @@ key  = SHA256(code      | salt | KEY)    first 8 chars, uppercase
 ## Tests
 
 `tests/backup.test.ts` (8 tests), `tests/restore.test.ts` (3 tests),
-`tests/cloudBackup.test.ts` (22 tests) and
+`tests/cloudBackup.test.ts` (23 tests) and
 `tests/offlineActivation.test.ts`
 (9 tests): backup creation/validation, tamper rejection, daily-due
 logic, one-file-per-year naming and per-year history, the
 6-collection shape; whole-workspace restore (valid backup round-trips,
 bad payloads throw, voided flags survive); cloud backup (folder pick,
 yearly-file upload, pending/retry on failure, permission-lost
-handling, restore from Drive, disconnect); code/key derivation,
+handling, restore from Drive, disconnect, clear failure when the
+Drive app is missing); code/key derivation,
 verification, wrong-key/secret rejection, timing-safe compare, the
 confirmed developer WhatsApp number, the master-app-key → user-app
 round-trip (two-app flow), and the licensed-flag helpers being safe
 without browser storage.
+
+## Build notes
+
+- 2026-11-21: Run #24's demo job failed at the Gradle packaging step
+  — the runner could not download
+  `org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.24` (required by
+  `:capacitor-filesystem`). The master job on the same commit passed,
+  and the artifact is a long-published release, so this was a transient
+  runner-side download failure; re-triggered as Run #25 with no code
+  change.
