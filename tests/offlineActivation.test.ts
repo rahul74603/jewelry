@@ -89,7 +89,9 @@ describe("offline activation (MediSmart v2 scheme)", () => {
           "Namaste, Aurum activation code: A1B2C3D4. Please send the unlock key.",
         ),
     );
-    // The master secret is a placeholder, never a real secret in git.
-    expect(MASTER_SECRET_PLACEHOLDER).toBe("CHANGE-ME-BEFORE-DISTRIBUTION");
+    // The master secret is Ajay's chosen short secret ("Musebhai"),
+    // kept in git by his choice — a short public secret means the
+    // lock is light, not a real secret.
+    expect(MASTER_SECRET_PLACEHOLDER).toBe("Musebhai");
   });
 });

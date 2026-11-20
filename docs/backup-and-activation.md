@@ -119,10 +119,11 @@ key  = SHA256(code      | salt | KEY)    first 8 chars, uppercase
 
 ## Master secret — must be decided before distribution
 
-- The salt is currently the placeholder `CHANGE-ME-BEFORE-DISTRIBUTION`
-  (`MASTER_SECRET_PLACEHOLDER` in `src/lib/offlineActivation.ts`).
-- The developer must replace it with one long random secret, held
-  off-git (developer machine / password manager, never in the repo).
+- The salt is Ajay's chosen short secret `Musebhai`
+  (`MASTER_SECRET_PLACEHOLDER` in `src/lib/offlineActivation.ts`),
+  set in the 2026-11-20 update. A short public secret means the lock
+  is light — anyone reading the repo can generate keys. A long random
+  secret held off-git would be the real lock; Ajay chose short.
 - The **same** secret must be in the local app build and the master
   build, or codes and keys will not match.
 - MediSmart’s own salt was deliberately **not** copied or quoted here.

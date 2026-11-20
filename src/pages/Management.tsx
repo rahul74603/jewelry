@@ -623,6 +623,11 @@ function BackupRestoreSection() {
           </button>
         )}
       </div>
+      <p className="muted">
+        The folder picker should open inside Google Drive. If it opens
+        on local storage instead, tap ☰ in the picker and choose Google
+        Drive — the Drive app must be installed on this phone.
+      </p>
       <h3 className="spaced">Restore from a backup file</h3>
       <p className="muted">
         Choose a backup file from this phone (or one received on WhatsApp /
