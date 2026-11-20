@@ -121,9 +121,14 @@ public class DriveFolderPlugin extends Plugin {
         // An unknown/unavailable URI is ignored by DocumentsUI, so
         // this degrades gracefully to the default location.
         Uri driveRoot = driveRootUri();
-        if (driveRoot != null) {
-            intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, driveRoot);
+        if (driveRoot == null) {
+            // No Drive provider on this phone (Drive app not
+            // installed): say so clearly instead of opening local
+            // storage and letting the shopkeeper hunt for Drive.
+            call.reject("drive-app-missing");
+            return;
         }
+        intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, driveRoot);
         try {
             startActivityForResult(call, intent, "pickFolderResult");
         } catch (Exception e) {
