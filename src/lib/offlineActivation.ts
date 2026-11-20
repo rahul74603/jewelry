@@ -35,7 +35,7 @@ import { deviceIdentity } from "./device";
 export const DEVELOPER_WHATSAPP = "916263396446" as const;
 
 /** Replace with the real master secret before distribution. Never commit it. */
-export const MASTER_SECRET_PLACEHOLDER = "CHANGE-ME-BEFORE-DISTRIBUTION" as const;
+export const MASTER_SECRET_PLACEHOLDER = "Musebhai" as const;
 
 const INSTALL_ID_KEY = "aurum:install-id";
 const LICENSED_KEY = "aurum:offline-licensed";

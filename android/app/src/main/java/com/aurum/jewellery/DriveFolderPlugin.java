@@ -115,11 +115,42 @@ public class DriveFolderPlugin extends Plugin {
             .addFlags(READ_WRITE
                 | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
                 | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+        // Open the picker inside Google Drive when the Drive app is
+        // installed: without this, DocumentsUI opens on local storage
+        // and the shopkeeper has to hunt for Drive in the drawer menu.
+        // An unknown/unavailable URI is ignored by DocumentsUI, so
+        // this degrades gracefully to the default location.
+        Uri driveRoot = driveRootUri();
+        if (driveRoot != null) {
+            intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, driveRoot);
+        }
         try {
             startActivityForResult(call, intent, "pickFolderResult");
         } catch (Exception e) {
             call.reject("No folder picker available on this phone");
         }
+    }
+
+    /**
+     * The root document of the Google Drive DocumentsProvider, found
+     * by querying its roots (the documented way to discover them).
+     * Returns null when Drive is not installed / unavailable.
+     */
+    private Uri driveRootUri() {
+        try (Cursor c = getContext().getContentResolver().query(
+                DocumentsContract.buildRootsUri("com.google.android.apps.docs.storage"),
+                new String[]{DocumentsContract.Root.COLUMN_DOCUMENT_ID},
+                null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                String docId = c.getString(0);
+                if (docId != null && !docId.isEmpty()) {
+                    return DocumentsContract.buildDocumentUri(
+                        "com.google.android.apps.docs.storage", docId);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
     }
 
     @ActivityCallback private void pickFolderResult(PluginCall call, ActivityResult result) {

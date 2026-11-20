@@ -10,8 +10,9 @@ const fs = require("node:fs");
 // test plays the developer's master app: it reads this device's code from
 // the activation gate and generates the unlock key with the same
 // SHA-256 scheme (key = SHA256(code|secret|KEY), first 8 chars, upper).
-// It is a public placeholder in this repo, never a real secret.
-const MASTER_SECRET = "CHANGE-ME-BEFORE-DISTRIBUTION";
+// It is Ajay's chosen short secret ("Musebhai"), kept in git by his
+// choice — a short public secret means the lock is light.
+const MASTER_SECRET = "Musebhai";
 const pkg = "com.aurum.jewellery.preview",
   out = "test-results/phone";
 const shell = (...args) =>
