@@ -9,9 +9,11 @@
  * in place every day, so there is always exactly one current file and
  * old years stay listed separately. No Gmail backup — the shopkeeper
  * downloads the file in one tap (Backup now) or shares it manually
- * (WhatsApp / Drive) from the Share sheet. There is NO automatic
- * upload: Google Drive needs a one-time sign-in, so Drive stays a
- * manual share, not an auto-upload.
+ * (WhatsApp) from the Share sheet. The same file is ALSO written to
+ * a Google Drive folder the shopkeeper picks once — see
+ * src/lib/cloudBackup.ts (Storage Access Framework, no sign-in, no
+ * OAuth). The local copy is always kept; a failed cloud upload only
+ * marks the cloud copy pending and retries with the next backup.
  *
  * Backup runs daily-on-open (like MediSmart), NOT at an exact 02:00 —
  * an exact 02:00 backup needs a native Android WorkManager scheduler
