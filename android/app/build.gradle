@@ -1,10 +1,16 @@
 apply plugin: 'com.android.application'
 
+// Optional suffix for the master app build (-PaurumAppIdSuffix=.master):
+// the master APK then gets its own package (com.aurum.jewellery.master),
+// so it installs side-by-side with the customer app on one phone.
+// Without the property the customer package is unchanged.
+def aurumAppIdSuffix = project.findProperty("aurumAppIdSuffix") ?: ""
+
 android {
     namespace "com.aurum.jewellery"
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.aurum.jewellery"
+        applicationId "com.aurum.jewellery" + aurumAppIdSuffix
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
