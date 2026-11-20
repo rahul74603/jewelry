@@ -23,6 +23,17 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+    // MediSmart-style ABI splits: one APK per phone ABI, no universal APK.
+    // arm64-v8a = latest phones, armeabi-v7a = older/medium phones,
+    // x86_64 = built only (emulator + split parity) and never published.
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+            universalApk false
+        }
+    }
 }
 
 repositories {
