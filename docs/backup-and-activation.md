@@ -7,10 +7,12 @@ MediSmart-v2-style backup and activation, adapted for Aurum. Branch:
 
 - **What it is:** a versioned JSON file (`{format: "aurum-backup",
   version: 1}`) holding the whole workspace — profile, products,
-  customers, rates, invoices, drafts (the 6 real collections in
+  customers, rates, invoices, drafts, loans (the 7 real collections in
   `functions/src/core/model.ts`) — plus a SHA-256 checksum over
   canonical JSON (`stableJson`) and per-collection counts. See
-  `src/lib/backup.ts`.
+  `src/lib/backup.ts`. Backups made before the Girvi & EMI module have
+  no loans collection and still restore — the restore fills
+  `loans: []` for them.
 - **Where it lives:** Settings → “Backup & restore”. **Backup now**
   (one tap) writes the file straight to the phone’s
   `Documents/AurumBackup/` folder — no share sheet, no picking a
@@ -73,7 +75,7 @@ MediSmart-v2-style backup and activation, adapted for Aurum. Branch:
   a file, it is validated first (format, version, SHA-256 checksum,
   record counts), then one confirmation applies it —
   `perform("restore", workspaceData)` replaces the whole workspace
-  (all 6 collections) via the `"restore"` Action in
+  (all 7 collections) via the `"restore"` Action in
   `functions/src/core/model.ts`, a `demoMutation` case, and a server
   handler in `functions/src/server/workspace.ts` (which also rebuilds
   voided/converted flags and bumps document counters past the highest

@@ -24,9 +24,9 @@
  * replaces the whole workspace. The hook refuses to apply anything
  * that fails validation.
  *
- * The workspace has exactly 6 real collections (see
+ * The workspace has exactly 7 real collections (see
  * functions/src/core/model.ts `Workspace`): profile, products,
- * customers, rates, invoices, drafts. Do NOT invent
+ * customers, rates, invoices, drafts, loans. Do NOT invent
  * payments / customerLedger / stockMovements / reversals /
  * conversions collections — they do not exist in the model.
  */
@@ -63,6 +63,7 @@ export type BackupCounts = {
   rates: number;
   invoices: number;
   drafts: number;
+  loans: number;
 };
 
 export type BackupFile = {
@@ -105,6 +106,8 @@ export function countsFor(data: Workspace): BackupCounts {
     rates: data.rates.length,
     invoices: data.invoices.length,
     drafts: data.drafts.length,
+    // Loans are optional in older backups — count them as 0 there.
+    loans: (data.loans ?? []).length,
   };
 }
 
@@ -175,6 +178,9 @@ export async function validateBackup(value: unknown): Promise<BackupValidation> 
   for (const key of ["profile", "products", "customers", "rates", "invoices", "drafts"] as const) {
     if (!(key in data)) errors.push(`Backup data is missing "${key}".`);
   }
+  // "loans" is optional here: backups made before the Girvi & EMI
+  // module have no loans collection, and they must still restore —
+  // the restore path fills loans: [] for them.
   if (errors.length) return { valid: false, errors };
 
   const expected = await checksumFor(data);
@@ -184,7 +190,8 @@ export async function validateBackup(value: unknown): Promise<BackupValidation> 
     );
   const counts = countsFor(data);
   for (const [k, v] of Object.entries(counts)) {
-    if (file.counts?.[k as keyof BackupCounts] !== v)
+    // Older backups have no loans count — treat a missing count as 0.
+    if ((file.counts?.[k as keyof BackupCounts] ?? 0) !== v)
       errors.push(`Record count mismatch for ${k}.`);
   }
   if (errors.length) return { valid: false, errors };

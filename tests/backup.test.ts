@@ -72,6 +72,7 @@ describe("offline backup", () => {
       rates: 1,
       invoices: 0,
       drafts: 0,
+      loans: 0,
     });
     expect(countsFor(file.data)).toEqual(file.counts);
   });
@@ -144,12 +145,13 @@ describe("offline backup", () => {
     expect(history[history.length - 1].filename).toContain("2017");
   });
 
-  it("carries only the 6 real workspace collections", async () => {
+  it("carries only the 7 real workspace collections", async () => {
     const file = await createBackup(sampleWorkspace());
     expect(Object.keys(file.data).sort()).toEqual([
       "customers",
       "drafts",
       "invoices",
+      "loans",
       "products",
       "profile",
       "rates",

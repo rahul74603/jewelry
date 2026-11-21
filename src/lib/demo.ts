@@ -15,7 +15,15 @@ import {
   finalizeSchema,
   adjustment,
   workspaceSchema,
+  loanSchema,
+  loanPaymentInputSchema,
+  loanForfeitInputSchema,
 } from "../../functions/src/core/model";
+import {
+  forfeitedProduct,
+  loanSummary,
+  todayDay,
+} from "../../functions/src/core/loans";
 import {
   calculateInvoice,
   assertReviewedPayment,
@@ -133,6 +141,82 @@ export function seedDemo(): Workspace {
     email: "",
     gstin: "",
   }));
+  // Sample girvi + EMI records: one overdue girvi, one due-soon girvi
+  // and one active EMI, so the due list and the reminders are visible.
+  const dayISO = (offset: number) =>
+    new Date(now + offset * 86400000).toISOString().slice(0, 10);
+  const atISO = (offset: number) =>
+    new Date(now + offset * 86400000).toISOString();
+  w.loans = [
+    {
+      id: "loan-girvi-overdue",
+      kind: "girvi" as const,
+      customerId: "client-0",
+      itemName: "Gold necklace 22K",
+      itemMetal: "Gold",
+      itemPurity: "22K",
+      itemWeight: 12.5,
+      principalPaise: 2000000,
+      totalPaise: 2000000,
+      upfrontPaise: 0,
+      interestRatePct: 2,
+      startAt: dayISO(-75),
+      dueAt: dayISO(-5),
+      payments: [],
+      status: "active" as const,
+      createdAt: atISO(-75),
+    },
+    {
+      id: "loan-girvi-soon",
+      kind: "girvi" as const,
+      customerId: "client-2",
+      itemName: "Gold bangles pair 22K",
+      itemMetal: "Gold",
+      itemPurity: "22K",
+      itemWeight: 8.25,
+      principalPaise: 5000000,
+      totalPaise: 5000000,
+      upfrontPaise: 0,
+      interestRatePct: 2,
+      startAt: dayISO(-40),
+      dueAt: dayISO(5),
+      payments: [
+        {
+          id: "loanpay-1",
+          at: atISO(-10),
+          amountPaise: 200000,
+          mode: "Cash" as const,
+        },
+      ],
+      status: "active" as const,
+      createdAt: atISO(-40),
+    },
+    {
+      id: "loan-emi-1",
+      kind: "emi" as const,
+      customerId: "client-1",
+      itemName: "Temple gold necklace",
+      itemMetal: "Gold",
+      itemPurity: "22K",
+      itemWeight: 15.22,
+      principalPaise: 10000000,
+      totalPaise: 15120000,
+      upfrontPaise: 5120000,
+      interestRatePct: 1.5,
+      startAt: dayISO(-60),
+      dueAt: dayISO(30),
+      payments: [
+        {
+          id: "loanpay-2",
+          at: atISO(-30),
+          amountPaise: 1000000,
+          mode: "UPI" as const,
+        },
+      ],
+      status: "active" as const,
+      createdAt: atISO(-60),
+    },
+  ];
   let seq = 1000;
   const start = new Date(now + 19800000).toISOString().slice(0, 10);
   const midnight = Date.parse(start + "T00:00:00+05:30");
@@ -281,6 +365,43 @@ export function demoMutation(
     postings(b, true).movements.forEach((m) => {
       d.products.find((p) => p.id === m.productId)!.stock += m.delta;
     });
+  } else if (action === "loan") {
+    const l = loanSchema.parse(raw);
+    if (d.loans.some((x) => x.id === l.id))
+      throw Error("This girvi / EMI record already exists.");
+    if (!d.customers.some((c) => c.id === l.customerId))
+      throw Error("Customer not found.");
+    d.loans.push(l);
+  } else if (action === "loanPayment") {
+    const { loanId, payment } = loanPaymentInputSchema.parse(raw);
+    const l = d.loans.find((x) => x.id === loanId);
+    if (!l) throw Error("Girvi / EMI record not found.");
+    if (l.status !== "active")
+      throw Error("This record is forfeited — no more payments.");
+    if (loanSummary(l).balancePaise <= 0)
+      throw Error("This record is fully repaid.");
+    if (payment.at.slice(0, 10) < l.startAt)
+      throw Error("Payment cannot be before the start date.");
+    if (payment.amountPaise > loanSummary(l).balancePaise)
+      throw Error("Payment is more than the balance due.");
+    l.payments.push(payment);
+  } else if (action === "loanForfeit") {
+    const { loanId, note } = loanForfeitInputSchema.parse(raw);
+    const l = d.loans.find((x) => x.id === loanId);
+    if (!l) throw Error("Girvi / EMI record not found.");
+    if (l.kind !== "girvi")
+      throw Error("Only a girvi record can be forfeited.");
+    if (l.status !== "active")
+      throw Error("This record is already forfeited.");
+    const balance = loanSummary(l, todayDay()).balancePaise;
+    if (balance <= 0)
+      throw Error("This record is fully repaid — nothing to forfeit.");
+    l.status = "forfeited";
+    l.forfeitedAt = at;
+    if (note) l.forfeitNote = note;
+    // The collateral becomes the shop's item, valued at the balance
+    // still owed when it was forfeited.
+    d.products.push(forfeitedProduct(l, balance));
   } else if (action === "restore") {
     // Whole-workspace replace from a backup file. The payload must be a
     // backup's data that already passed validateBackup() (checksum +

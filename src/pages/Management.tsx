@@ -488,7 +488,7 @@ function BackupRestoreSection() {
       setPreview(null);
       setConfirmRestore(false);
       notify(
-        `Restored — ${counts.products} products, ${counts.customers} customers, ${counts.rates} rates, ${counts.invoices} invoices, ${counts.drafts} drafts.`,
+        `Restored — ${counts.products} products, ${counts.customers} customers, ${counts.rates} rates, ${counts.invoices} invoices, ${counts.drafts} drafts, ${counts.loans ?? 0} girvi / EMI records.`,
       );
     } catch (e) {
       setError(err(e));
@@ -688,7 +688,8 @@ function BackupRestoreSection() {
             {day(new Date(preview.createdAt).getTime())} —{" "}
             {preview.counts.products} products, {preview.counts.customers}{" "}
             customers, {preview.counts.rates} rates, {preview.counts.invoices}{" "}
-            invoices, {preview.counts.drafts} drafts.
+            invoices, {preview.counts.drafts} drafts,{" "}
+            {preview.counts.loans ?? 0} girvi / EMI records.
           </p>
         </div>
       )}
@@ -721,7 +722,7 @@ function BackupRestoreSection() {
               {preview.counts.products} products, {preview.counts.customers}{" "}
               customers, {preview.counts.rates} rates,{" "}
               {preview.counts.invoices} invoices, {preview.counts.drafts}{" "}
-              drafts.
+              drafts, {preview.counts.loans ?? 0} girvi / EMI records.
             </p>
             <div className="settings-actions">
               <button

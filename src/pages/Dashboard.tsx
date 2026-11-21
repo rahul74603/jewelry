@@ -41,6 +41,11 @@ import {
   loadBackupPreferences,
   runDailyCheck,
 } from "../lib/backup";
+import {
+  dueLoans,
+  loanState,
+  loanSummary,
+} from "../../functions/src/core/loans";
 import type { Invoice, Workspace } from "../../functions/src/core/model";
 export function SalesChart({ data }: { data: Workspace }) {
   const [length, N] = useState(7),
@@ -291,6 +296,14 @@ export default function Dashboard() {
     }
   }, []);
   const hi = data.profile.language === "hi";
+  // Daily-on-open girvi / EMI check (same pattern as the backup
+  // reminder above): every morning the shopkeeper sees which records
+  // are due today or overdue, with the balance still owed. No native
+  // scheduler, no automatic messages — the reminder list lives on the
+  // Girvi & EMI page with a WhatsApp one-tap button per record.
+  const due = useMemo(() => dueLoans(data.loans ?? []), [data.loans]),
+    dueBalance = due.reduce((n, l) => n + loanSummary(l).balancePaise, 0),
+    overdueCount = due.filter((l) => loanState(l) === "overdue").length;
   const rows = series(data, period),
     sales = rows.reduce((s, r) => s + r.sales, 0),
     paid = rows.reduce((s, r) => s + r.paid, 0),
@@ -376,6 +389,21 @@ export default function Dashboard() {
               connected Google Drive folder, so your data survives a lost
               phone. Connect a Drive folder once in Settings → Backup
               &amp; restore.
+            </p>
+          </div>
+        </section>
+      )}
+      {due.length > 0 && (
+        <section className="panel">
+          <div className="info-box">
+            <Hourglass size={20} />
+            <p>
+              {due.length} girvi / EMI record{due.length > 1 ? "s are" : " is"}{" "}
+              due today or overdue
+              {overdueCount > 0 ? ` (${overdueCount} overdue)` : ""} —{" "}
+              {rupee(dueBalance, 2)} balance due.{" "}
+              <Link to="/loans">Open Girvi &amp; EMI</Link> to send the
+              WhatsApp reminder.
             </p>
           </div>
         </section>

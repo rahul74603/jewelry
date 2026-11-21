@@ -141,6 +141,87 @@ export const lineSchema = z.object({
 export type LineInput = z.infer<typeof lineSchema>;
 export const tenderModes = ["Cash", "UPI", "Bank", "Card", "Other"] as const;
 export type TenderMode = (typeof tenderModes)[number];
+
+/** One payment against a girvi / EMI record. A payment first settles
+ * accrued interest, then reduces the principal — see
+ * functions/src/core/loans.ts. Amounts are paise. */
+export const loanPaymentSchema = z.object({
+  id,
+  at: z.string().datetime(),
+  amountPaise: z.number().int().positive().max(100_000_000_00),
+  mode: z.enum(tenderModes),
+  note: z.string().trim().max(200).optional(),
+});
+export type LoanPayment = z.infer<typeof loanPaymentSchema>;
+/** A girvi (pawn) loan or an EMI (instalment) sale. The interest rate
+ * is MANUAL per record — the shopkeeper enters it, % per month, and
+ * it never changes after the record is created. Girvi: the customer
+ * leaves jewellery as collateral and takes cash; if it is not fully
+ * repaid by dueAt the shopkeeper may forfeit it and the item moves
+ * into stock. EMI: the customer takes a gold item, pays some upfront,
+ * and pays the rest in flexible instalments — any amount, any time,
+ * no fixed instalment. For EMI, principal + upfront = total price;
+ * for girvi, total = principal and upfront is 0. */
+export const loanSchema = z
+  .object({
+    id,
+    kind: z.enum(["girvi", "emi"]),
+    customerId: id,
+    itemName: text(120),
+    itemMetal: text(40),
+    itemPurity: text(30),
+    /** Grams. Required for girvi — the collateral goes to stock on
+     * forfeit, and stock needs a weight. */
+    itemWeight: weight,
+    principalPaise: z.number().int().positive(),
+    totalPaise: z.number().int().positive(),
+    upfrontPaise: z.number().int().nonnegative(),
+    /** Manual monthly interest rate, % per month. */
+    interestRatePct: z.number().min(0).max(100).multipleOf(0.01),
+    /** Calendar dates (YYYY-MM-DD). */
+    startAt: z.string().date(),
+    /** Validity / due date: repay in full by this date. */
+    dueAt: z.string().date(),
+    payments: z.array(loanPaymentSchema).max(500),
+    status: z.enum(["active", "forfeited"]),
+    forfeitedAt: z.string().datetime().optional(),
+    forfeitNote: z.string().trim().max(200).optional(),
+    createdAt: z.string().datetime(),
+  })
+  .refine((l) => l.kind !== "girvi" || l.itemWeight > 0, {
+    message: "Girvi needs the item weight — the collateral goes to stock if it is forfeited.",
+    path: ["itemWeight"],
+  })
+  .refine((l) => l.kind !== "girvi" || l.upfrontPaise === 0, {
+    message: "Girvi has no upfront — the total is the cash given.",
+    path: ["upfrontPaise"],
+  })
+  .refine((l) => l.kind !== "girvi" || l.totalPaise === l.principalPaise, {
+    message: "Girvi total is the cash given.",
+    path: ["totalPaise"],
+  })
+  .refine(
+    (l) =>
+      l.kind !== "emi" ||
+      l.totalPaise === l.principalPaise + l.upfrontPaise,
+    {
+      message: "EMI principal + upfront must equal the item price.",
+      path: ["principalPaise"],
+    },
+  )
+  .refine((l) => l.startAt <= l.dueAt, {
+    message: "Due date must be on or after the start date.",
+    path: ["dueAt"],
+  });
+export type Loan = z.infer<typeof loanSchema>;
+export const loanPaymentInputSchema = z.object({
+  loanId: id,
+  payment: loanPaymentSchema,
+});
+export const loanForfeitInputSchema = z.object({
+  loanId: id,
+  note: z.string().trim().max(200).optional(),
+});
 export const invoiceSchema = z.object({
   id,
   customerId: z.union([id, z.literal("")]),
@@ -264,6 +345,7 @@ export type Workspace = {
   rates: Rate[];
   invoices: Invoice[];
   drafts: Draft[];
+  loans: Loan[];
 };
 export type LicenseInfo = {
   id: string;
@@ -280,6 +362,7 @@ export const emptyWorkspace = (profile: Profile): Workspace => ({
   rates: [],
   invoices: [],
   drafts: [],
+  loans: [],
 });
 export function stableJson(value: unknown): string {
   if (Array.isArray(value)) return "[" + value.map(stableJson).join(",") + "]";
@@ -305,6 +388,9 @@ export type Action =
   | "draft"
   | "void"
   | "adjust"
+  | "loan"
+  | "loanPayment"
+  | "loanForfeit"
   | "restore";
 
 /** A full workspace snapshot as stored in a backup file. Invoices are
@@ -365,6 +451,8 @@ export const workspaceSchema = z.object({
   rates: z.array(rateSchema).max(2000),
   invoices: z.array(invoiceSnapshotSchema).max(2000),
   drafts: z.array(draftSnapshotSchema).max(2000),
+  // Default [] so backups made before the Girvi & EMI module still restore.
+  loans: z.array(loanSchema).max(2000).default([]),
 });
 export const adjustment = z.object({
   id,

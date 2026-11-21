@@ -35,6 +35,7 @@ import {
   PackageSearch,
   Mail,
   CalendarDays,
+  HandCoins,
 } from "lucide-react";
 import { Brand, Icon, Modal, Avatar, Empty } from "./ui";
 import { useShop } from "../lib/store";
@@ -43,6 +44,7 @@ import Dashboard from "../pages/Dashboard";
 import { Invoices, InvoiceEditor, InvoiceDetail } from "../pages/Billing";
 import { Inventory, Customers, MetalRates } from "../pages/Catalog";
 import { Reports, Settings } from "../pages/Management";
+import { Loans } from "../pages/Loans";
 const links = [
   { path: "/", name: "Dashboard", hi: "डैशबोर्ड", icon: LayoutDashboard },
   {
@@ -53,6 +55,12 @@ const links = [
   },
   { path: "/inventory", name: "Inventory", hi: "स्टॉक", icon: Boxes },
   { path: "/customers", name: "Customers", hi: "ग्राहक", icon: Users },
+  {
+    path: "/loans",
+    name: "Girvi & EMI",
+    hi: "गिरवी और EMI",
+    icon: HandCoins,
+  },
   { path: "/rates", name: "Metal rates", hi: "धातु के भाव", icon: Layers3 },
   {
     path: "/reports",
@@ -124,6 +132,12 @@ export function Shell() {
       title: c.name,
       kind: "Customer",
       path: "/customers?item=" + c.id,
+    })),
+    ...(data.loans ?? []).map((l) => ({
+      title: l.itemName,
+      kind: (l.kind === "girvi" ? "Girvi · " : "EMI · ") +
+        (data.customers.find((c) => c.id === l.customerId)?.name ?? ""),
+      path: "/loans?item=" + l.id,
     })),
     ...data.invoices
       .slice()
@@ -257,6 +271,7 @@ export function Shell() {
               <Route path="/billing/:id" element={<InvoiceDetail />} />
               <Route path="/inventory" element={<Inventory />} />
               <Route path="/customers" element={<Customers />} />
+              <Route path="/loans" element={<Loans />} />
               <Route path="/rates" element={<MetalRates />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/settings" element={<Settings />} />

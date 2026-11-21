@@ -8,6 +8,7 @@ import {
   type Rate,
   type Invoice,
   type Draft,
+  type Loan,
   id,
   profileSchema,
   productSchema,
@@ -19,7 +20,15 @@ import {
   finalizeSchema,
   confirmationSchema,
   workspaceSchema,
+  loanSchema,
+  loanPaymentInputSchema,
+  loanForfeitInputSchema,
 } from "../core/model";
+import {
+  forfeitedProduct,
+  loanSummary,
+  todayDay,
+} from "../core/loans";
 import {
   assertDraftPayment,
   assertReviewedPayment,
@@ -80,6 +89,7 @@ export async function shopAction(
       rates,
       invoices,
       drafts,
+      loans,
       voids,
       conversions,
     ] = await Promise.all([
@@ -89,6 +99,7 @@ export async function shopAction(
       rows<Rate>(tx, t, "metalRates"),
       rows<Invoice>(tx, t, "invoices"),
       rows<Draft>(tx, t, "drafts"),
+      rows<Loan>(tx, t, "loans"),
       rows<{ id: string; at: string; creditNote?: Invoice["creditNote"] }>(
         tx,
         t,
@@ -104,6 +115,7 @@ export async function shopAction(
       customers,
       rates,
       drafts,
+      loans,
       invoices: invoices.map((b) => ({
         ...b,
         ...(v.has(b.id)
@@ -350,15 +362,61 @@ export async function shopAction(
     log(input ? "Document finalized" : "Document reversed", key);
     return { id: key, number: b.number };
   }
+  if (action === "loan") {
+    const l = loanSchema.parse(raw);
+    tx.create(record("loans", l.id), l);
+    log("Girvi / EMI record created", l.id);
+    return { ok: true };
+  }
+  if (action === "loanPayment") {
+    const { loanId, payment } = loanPaymentInputSchema.parse(raw);
+    const ref = record("loans", loanId),
+      snap = await tx.get(ref);
+    if (!snap.exists) throw Error("Girvi / EMI record not found.");
+    const l = snap.data() as Loan;
+    if (l.status !== "active")
+      throw Error("This record is forfeited — no more payments.");
+    if (loanSummary(l).balancePaise <= 0)
+      throw Error("This record is fully repaid.");
+    if (payment.amountPaise > loanSummary(l).balancePaise)
+      throw Error("Payment is more than the balance due.");
+    tx.set(ref, { ...l, payments: [...l.payments, payment] });
+    log("Girvi / EMI payment recorded", loanId);
+    return { ok: true };
+  }
+  if (action === "loanForfeit") {
+    const { loanId, note } = loanForfeitInputSchema.parse(raw);
+    const ref = record("loans", loanId),
+      snap = await tx.get(ref);
+    if (!snap.exists) throw Error("Girvi / EMI record not found.");
+    const l = snap.data() as Loan;
+    if (l.kind !== "girvi")
+      throw Error("Only a girvi record can be forfeited.");
+    if (l.status !== "active")
+      throw Error("This record is already forfeited.");
+    const balance = loanSummary(l, todayDay(new Date(at))).balancePaise;
+    if (balance <= 0)
+      throw Error("This record is fully repaid — nothing to forfeit.");
+    const product = forfeitedProduct(l, balance);
+    tx.set(ref, {
+      ...l,
+      status: "forfeited",
+      forfeitedAt: date,
+      ...(note ? { forfeitNote: note } : {}),
+    });
+    tx.create(record("products", product.id), product);
+    log("Girvi forfeited — collateral moved to stock", loanId);
+    return { ok: true };
+  }
   if (action === "restore") {
     // Whole-workspace replace from a backup file. The payload must be a
     // backup's data that already passed validateBackup() (checksum +
     // counts) in the UI — it is re-parsed here so a bad payload can never
-    // silently wipe the workspace. Replaces the 6 workspace collections;
+    // silently wipe the workspace. Replaces the 7 workspace collections;
     // reversals/conversions are rebuilt from the restored invoices so
     // voided/converted flags survive the read-back. Payment, ledger and
     // stock-movement history are derived data and are NOT rebuilt from
-    // the backup (they are not part of the 6 collections).
+    // the backup (they are not part of the 7 collections).
     const next = workspaceSchema.parse(raw) as unknown as import("../core/model").Workspace;
     const buckets: [string, { id: string }[]][] = [
       ["products", next.products],
@@ -366,6 +424,7 @@ export async function shopAction(
       ["customers", next.customers],
       ["invoices", next.invoices],
       ["drafts", next.drafts],
+      ["loans", next.loans],
     ];
     const [oldRefs, oldReversals, oldConversions] = await Promise.all([
       Promise.all(buckets.map(([name]) => refs(tx, t, name))).then((rs) =>
@@ -450,6 +509,7 @@ export async function shopAction(
         rates: next.rates.length,
         invoices: next.invoices.length,
         drafts: next.drafts.length,
+        loans: next.loans.length,
       },
     };
   }

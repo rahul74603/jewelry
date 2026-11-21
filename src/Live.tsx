@@ -318,7 +318,8 @@ function LicensedShop() {
     return (
       <Shop.Provider
         value={{
-          data: snapshot.workspace,
+          // Older live workspaces have no loans collection yet.
+          data: { ...snapshot.workspace, loans: snapshot.workspace.loans ?? [] },
           license: snapshot.license,
           demo: false,
           logout: () => signOut(auth),
