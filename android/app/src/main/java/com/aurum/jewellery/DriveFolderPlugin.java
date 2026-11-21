@@ -58,6 +58,10 @@ public class DriveFolderPlugin extends Plugin {
         DocumentsContract.Document.COLUMN_DOCUMENT_ID,
         DocumentsContract.Document.COLUMN_DISPLAY_NAME
     };
+    private static final String DRIVE_AUTHORITY =
+        "com.google.android.apps.docs.storage";
+    /** My Drive's root document id in the Drive DocumentsProvider. */
+    private static final String DRIVE_ROOT_DOC_ID = "root";
 
     private static Uri treeDocUri(Uri treeUri) {
         return DocumentsContract.buildDocumentUriUsingTree(
@@ -118,17 +122,17 @@ public class DriveFolderPlugin extends Plugin {
         // Open the picker inside Google Drive when the Drive app is
         // installed: without this, DocumentsUI opens on local storage
         // and the shopkeeper has to hunt for Drive in the drawer menu.
-        // An unknown/unavailable URI is ignored by DocumentsUI, so
-        // this degrades gracefully to the default location.
-        Uri driveRoot = driveRootUri();
-        if (driveRoot == null) {
-            // No Drive provider on this phone (Drive app not
-            // installed): say so clearly instead of opening local
-            // storage and letting the shopkeeper hunt for Drive.
-            call.reject("drive-app-missing");
-            return;
-        }
-        intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, driveRoot);
+        // The roots query can come back empty even with Drive
+        // installed (Drive never opened / not signed in yet, or the
+        // provider refusing the query), so a missing root must NOT
+        // block the picker — driveRootUri() falls back to My Drive's
+        // well-known "root" document, and DocumentsUI ignores an
+        // unknown initial URI, so this degrades gracefully to the
+        // default location instead of wrongly claiming Drive is
+        // missing. A folder outside Drive is rejected in
+        // pickFolderResult instead, so a local folder can never be
+        // saved as the "Drive" folder.
+        intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, driveRootUri());
         try {
             startActivityForResult(call, intent, "pickFolderResult");
         } catch (Exception e) {
@@ -147,45 +151,55 @@ public class DriveFolderPlugin extends Plugin {
      * and it built a document URI where the folder picker wants a
      * tree URI. Now the "My Drive" root is picked explicitly — by
      * document id "root" or title, falling back to the first root —
-     * and the initial URI is a tree URI. Returns null when Drive is
-     * not installed / unreachable.
+     * and the initial URI is a tree URI.
+     *
+     * The roots query can still come back empty even with Drive
+     * installed (Drive never opened / not signed in yet, or the
+     * provider refusing the query — seen on a phone with Drive
+     * installed in Nov 2026). That must never be read as "Drive is
+     * missing": the fallback is My Drive's well-known "root"
+     * document id as a tree URI, and DocumentsUI ignores an
+     * unusable initial URI, so the picker still opens and the
+     * shopkeeper can reach Drive from its drawer menu.
      */
     private Uri driveRootUri() {
         try (Cursor c = getContext().getContentResolver().query(
-                DocumentsContract.buildRootsUri("com.google.android.apps.docs.storage"),
+                DocumentsContract.buildRootsUri(DRIVE_AUTHORITY),
                 new String[]{
                     DocumentsContract.Root.COLUMN_DOCUMENT_ID,
                     DocumentsContract.Root.COLUMN_TITLE,
                     DocumentsContract.Root.COLUMN_ROOT_ID},
                 null, null, null)) {
-            if (c == null) return null;
-            int docIdCol = c.getColumnIndex(
-                DocumentsContract.Root.COLUMN_DOCUMENT_ID);
-            int titleCol = c.getColumnIndex(
-                DocumentsContract.Root.COLUMN_TITLE);
-            int rootIdCol = c.getColumnIndex(
-                DocumentsContract.Root.COLUMN_ROOT_ID);
-            String firstDocId = null;
-            while (c.moveToNext()) {
-                String docId = docIdCol >= 0 ? c.getString(docIdCol) : null;
-                if (docId == null || docId.isEmpty()) continue;
-                if (firstDocId == null) firstDocId = docId;
-                String title = titleCol >= 0 ? c.getString(titleCol) : null;
-                String rootId = rootIdCol >= 0 ? c.getString(rootIdCol) : null;
-                if ("root".equals(docId) || "root".equals(rootId)
-                        || (title != null
-                            && "My Drive".equalsIgnoreCase(title))) {
-                    return DocumentsContract.buildTreeDocumentUri(
-                        "com.google.android.apps.docs.storage", docId);
+            if (c != null) {
+                int docIdCol = c.getColumnIndex(
+                    DocumentsContract.Root.COLUMN_DOCUMENT_ID);
+                int titleCol = c.getColumnIndex(
+                    DocumentsContract.Root.COLUMN_TITLE);
+                int rootIdCol = c.getColumnIndex(
+                    DocumentsContract.Root.COLUMN_ROOT_ID);
+                String firstDocId = null;
+                while (c.moveToNext()) {
+                    String docId = docIdCol >= 0 ? c.getString(docIdCol) : null;
+                    if (docId == null || docId.isEmpty()) continue;
+                    if (firstDocId == null) firstDocId = docId;
+                    String title = titleCol >= 0 ? c.getString(titleCol) : null;
+                    String rootId = rootIdCol >= 0 ? c.getString(rootIdCol) : null;
+                    if ("root".equals(docId) || "root".equals(rootId)
+                            || (title != null
+                                && "My Drive".equalsIgnoreCase(title))) {
+                        return DocumentsContract.buildTreeDocumentUri(
+                            DRIVE_AUTHORITY, docId);
+                    }
                 }
-            }
-            if (firstDocId != null) {
-                return DocumentsContract.buildTreeDocumentUri(
-                    "com.google.android.apps.docs.storage", firstDocId);
+                if (firstDocId != null) {
+                    return DocumentsContract.buildTreeDocumentUri(
+                        DRIVE_AUTHORITY, firstDocId);
+                }
             }
         } catch (Exception ignored) {
         }
-        return null;
+        return DocumentsContract.buildTreeDocumentUri(
+            DRIVE_AUTHORITY, DRIVE_ROOT_DOC_ID);
     }
 
     @ActivityCallback private void pickFolderResult(PluginCall call, ActivityResult result) {
@@ -201,6 +215,13 @@ public class DriveFolderPlugin extends Plugin {
         Uri treeUri = result.getData().getData();
         if (!"content".equals(treeUri.getScheme())) {
             call.reject("No folder selected");
+            return;
+        }
+        if (!DRIVE_AUTHORITY.equals(treeUri.getAuthority())) {
+            // Only a folder inside Google Drive counts as the cloud
+            // folder — a folder on this phone would silently make
+            // "cloud" backup phone-only. The shopkeeper picks again.
+            call.reject("not-drive-folder");
             return;
         }
         try {

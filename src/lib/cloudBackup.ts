@@ -61,6 +61,20 @@ export interface DriveFolderNative {
 
 const driveFolder = registerPlugin<DriveFolderNative>("DriveFolder");
 
+/** Authority of the Google Drive DocumentsProvider (SAF). */
+const DRIVE_AUTHORITY = "com.google.android.apps.docs.storage";
+
+/**
+ * True when the picked tree lives inside Google Drive. The picker can
+ * also return a folder on this phone, and saving that as the "Drive"
+ * folder would silently make cloud backup phone-only — so such a pick
+ * is rejected. The native plugin enforces the same rule; this is the
+ * tested layer of it.
+ */
+function isDriveTreeUri(uri: string): boolean {
+  return uri.startsWith(`content://${DRIVE_AUTHORITY}/`);
+}
+
 /** Small storage interface so tests can pass a fake store. */
 export interface CloudStore {
   get(key: string): string | null;
@@ -262,6 +276,7 @@ export async function pickCloudFolder(
   if (!nativeUsable(native)) return null;
   const picked = await native.pickFolder();
   if (!picked.picked || !picked.uri) return null;
+  if (!isDriveTreeUri(picked.uri)) throw new Error("not-drive-folder");
   const folder: CloudFolder = {
     uri: picked.uri,
     name: (picked.name ?? "Google Drive folder").slice(0, 80),
