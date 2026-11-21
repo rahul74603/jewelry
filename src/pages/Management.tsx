@@ -66,6 +66,7 @@ import {
   verifyCloudFolder,
   disconnectCloudFolder,
   getCloudStatus,
+  cloudFailureText,
   type CloudFolder,
   type CloudStatus,
 } from "../lib/cloudBackup";
@@ -339,12 +340,16 @@ function BackupRestoreSection() {
     ),
     [lastCloud, setLastCloud] = useState<string | null>(() =>
       loadLastCloudBackupAt(),
+    ),
+    [cloudReason, setCloudReason] = useState<string | null>(
+      () => getCloudStatus().reason,
     );
   const refreshCloudState = () => {
     const s = getCloudStatus();
     setCloudFolder(s.folder);
     setCloudStatus(s.status);
     setLastCloud(s.lastCloudAt);
+    setCloudReason(s.reason);
   };
   // On opening Settings, check the Drive folder is still reachable —
   // the user may have deleted it or revoked access in the meantime.
@@ -390,9 +395,8 @@ function BackupRestoreSection() {
       else if (cloud.reason === "folder-missing")
         toast +=
           " Google Drive folder is gone — pick a folder again below. Local copy is safe.";
-      else if (cloud.reason === "failed")
-        toast +=
-          " Google Drive upload failed — will retry with the next backup. Local copy is safe.";
+      else if (cloud.reason !== "not-connected")
+        toast += ` Google Drive upload failed — ${cloudFailureText(cloud.reason)}. Local copy is safe.`;
       notify(toast);
     } catch (e) {
       setError(err(e));
@@ -593,7 +597,7 @@ function BackupRestoreSection() {
               ? ` · last cloud backup ${day(new Date(lastCloud).getTime())}`
               : " · no cloud backup yet"}
             {cloudStatus === "pending"
-              ? " · upload pending — will retry with the next backup"
+              ? ` · upload pending — ${cloudFailureText(cloudReason)}`
               : ""}
             {cloudStatus === "permission-lost"
               ? " · permission lost — pick the folder again"

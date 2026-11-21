@@ -140,24 +140,33 @@ export type CloudStatus =
   | "pending"
   | "permission-lost";
 
+export type CloudFailureReason =
+  | "permission-lost"
+  | "folder-missing"
+  | "could-not-create"
+  | "could-not-replace"
+  | "write-failed"
+  | "failed";
+
 export type CloudUploadResult =
   | { uploaded: true }
   | {
       uploaded: false;
-      reason: "not-connected" | "permission-lost" | "folder-missing" | "failed";
+      reason: "not-connected" | CloudFailureReason;
     };
 
 export type CloudDownloadResult =
   | { found: true; text: string }
   | {
       found: false;
-      reason: "not-connected" | "permission-lost" | "not-found" | "failed";
+      reason: "not-connected" | "not-found" | CloudFailureReason;
     };
 
 const FOLDER_KEY = "aurum:cloud:folder";
 const LAST_KEY = "aurum:cloud:last";
 const PENDING_KEY = "aurum:cloud:pending";
 const LOST_KEY = "aurum:cloud:access-lost";
+const REASON_KEY = "aurum:cloud:reason";
 
 /** True only in the Android app — the SAF picker does not exist on web. */
 export function isCloudSupported(): boolean {
@@ -199,15 +208,49 @@ export function saveCloudFolder(
   folder: CloudFolder,
   store: CloudStore = localCloudStore,
 ): void {
+  const previous = loadCloudFolder(store);
   store.set(FOLDER_KEY, JSON.stringify(folder));
   store.remove(LOST_KEY);
   store.remove(PENDING_KEY);
+  // A different folder has no cloud backup yet — the last-upload date
+  // and the last failure belong to the previous folder, not this one.
+  // (Seen Nov 2026: the date from the first folder stayed on screen
+  // after switching folders, while the new folder was still empty.)
+  if (!previous || previous.uri !== folder.uri) {
+    store.remove(LAST_KEY);
+    store.remove(REASON_KEY);
+  }
 }
 
 export function loadLastCloudBackupAt(
   store: CloudStore = localCloudStore,
 ): string | null {
   return store.get(LAST_KEY);
+}
+
+/** The specific reason the last cloud upload failed, if any. */
+export function loadCloudReason(
+  store: CloudStore = localCloudStore,
+): string | null {
+  return store.get(REASON_KEY);
+}
+
+/** One-line explanation of a failed cloud upload, for Settings/toasts. */
+export function cloudFailureText(reason: string | null): string {
+  switch (reason) {
+    case "permission-lost":
+      return "Drive permission lost — pick the folder again";
+    case "folder-missing":
+      return "Drive folder is gone — pick a folder again";
+    case "could-not-create":
+      return "Drive could not create the backup file — try Backup now again";
+    case "could-not-replace":
+      return "Drive could not replace the old backup file — try Backup now again";
+    case "write-failed":
+      return "Drive write failed — try Backup now again";
+    default:
+      return "will retry with the next backup";
+  }
 }
 
 export function isCloudUploadPending(
@@ -243,6 +286,7 @@ export function getCloudStatus(store: CloudStore = localCloudStore): {
   folder: CloudFolder | null;
   lastCloudAt: string | null;
   pending: boolean;
+  reason: string | null;
 } {
   const folder = loadCloudFolder(store);
   const pending = isCloudUploadPending(store);
@@ -252,15 +296,17 @@ export function getCloudStatus(store: CloudStore = localCloudStore): {
     folder,
     lastCloudAt: loadLastCloudBackupAt(store),
     pending,
+    reason: loadCloudReason(store),
   };
 }
 
-function reasonFromError(
-  e: unknown,
-): "permission-lost" | "folder-missing" | "failed" {
+function reasonFromError(e: unknown): CloudFailureReason {
   const message = e instanceof Error ? e.message : String(e);
   if (message.includes("permission-revoked")) return "permission-lost";
   if (message.includes("folder-missing")) return "folder-missing";
+  if (message.includes("could-not-create")) return "could-not-create";
+  if (message.includes("could-not-replace")) return "could-not-replace";
+  if (message.includes("write-failed")) return "write-failed";
   return "failed";
 }
 
@@ -308,12 +354,14 @@ export async function uploadBackupToCloud(
       content: backupToJson(file),
     });
     store.set(LAST_KEY, file.createdAt);
+    store.remove(REASON_KEY);
     setCloudPending(store, false);
     setAccessLost(store, false);
     return { uploaded: true };
   } catch (e) {
     const reason = reasonFromError(e);
     if (reason === "permission-lost") setAccessLost(store, true);
+    store.set(REASON_KEY, reason);
     setCloudPending(store, true);
     return { uploaded: false, reason };
   }
@@ -390,6 +438,7 @@ export async function disconnectCloudFolder(
   store.remove(LAST_KEY);
   store.remove(PENDING_KEY);
   store.remove(LOST_KEY);
+  store.remove(REASON_KEY);
 }
 
 /**
