@@ -7,6 +7,7 @@ import {
 import {
   deriveCloudStatus,
   loadCloudFolder,
+  loadLastCloudBackupAt,
   saveCloudFolder,
   getCloudStatus,
   pickCloudFolder,
@@ -124,6 +125,50 @@ describe("cloud folder storage", () => {
     expect(status.folder?.name).toBe("Aurum");
     expect(status.lastCloudAt).toBeNull();
   });
+  it("clears the last-upload date when the folder changes", async () => {
+    const { store } = memoryCloudStore();
+    saveCloudFolder(
+      {
+        uri: "content://com.google.android.apps.docs.storage/tree/OLD123",
+        name: "Old Folder",
+        connectedAt: "2026-11-20T09:00:00.000Z",
+      },
+      store,
+    );
+    await uploadBackupToCloud(await sampleBackup(), fakeNative(), store);
+    expect(loadLastCloudBackupAt(store)).toBe("2026-11-20T10:00:00.000Z");
+    const native = fakeNative({
+      pickFolder: async () => ({
+        picked: true,
+        uri: "content://com.google.android.apps.docs.storage/tree/NEW456",
+        name: "Aurum Backup",
+      }),
+    });
+    await pickCloudFolder(native, store);
+    expect(loadCloudFolder(store)?.name).toBe("Aurum Backup");
+    expect(loadLastCloudBackupAt(store)).toBeNull();
+    expect(getCloudStatus(store).lastCloudAt).toBeNull();
+  });
+  it("keeps the last-upload date when the same folder is picked again", async () => {
+    const { store } = memoryCloudStore();
+    const folder: CloudFolder = {
+      uri: "content://com.google.android.apps.docs.storage/tree/OLD123",
+      name: "Aurum Backup",
+      connectedAt: "2026-11-20T09:00:00.000Z",
+    };
+    saveCloudFolder(folder, store);
+    await uploadBackupToCloud(await sampleBackup(), fakeNative(), store);
+    expect(loadLastCloudBackupAt(store)).toBe("2026-11-20T10:00:00.000Z");
+    const native = fakeNative({
+      pickFolder: async () => ({
+        picked: true,
+        uri: folder.uri,
+        name: folder.name,
+      }),
+    });
+    await pickCloudFolder(native, store);
+    expect(loadLastCloudBackupAt(store)).toBe("2026-11-20T10:00:00.000Z");
+  });
 });
 
 describe("picking the Drive folder", () => {
@@ -217,8 +262,20 @@ describe("uploading the yearly file to Drive", () => {
       },
     });
     const result = await uploadBackupToCloud(await sampleBackup(), native, store);
-    expect(result).toEqual({ uploaded: false, reason: "failed" });
+    expect(result).toEqual({ uploaded: false, reason: "write-failed" });
     expect(getCloudStatus(store).status).toBe("pending");
+    expect(getCloudStatus(store).reason).toBe("write-failed");
+  });
+  it("keeps the generic reason for an unknown failure", async () => {
+    const { store } = connectedStore();
+    const native = fakeNative({
+      writeFile: async () => {
+        throw new Error("boom");
+      },
+    });
+    const result = await uploadBackupToCloud(await sampleBackup(), native, store);
+    expect(result).toEqual({ uploaded: false, reason: "failed" });
+    expect(getCloudStatus(store).reason).toBe("failed");
   });
   it("a later success clears the pending flag", async () => {
     const { store } = connectedStore();
@@ -229,6 +286,7 @@ describe("uploading the yearly file to Drive", () => {
     });
     await uploadBackupToCloud(await sampleBackup(), failing, store);
     expect(getCloudStatus(store).status).toBe("pending");
+    expect(getCloudStatus(store).reason).toBe("write-failed");
     const result = await uploadBackupToCloud(
       await sampleBackup(),
       fakeNative(),
@@ -236,6 +294,7 @@ describe("uploading the yearly file to Drive", () => {
     );
     expect(result).toEqual({ uploaded: true });
     expect(getCloudStatus(store).status).toBe("connected");
+    expect(getCloudStatus(store).reason).toBeNull();
   });
 });
 

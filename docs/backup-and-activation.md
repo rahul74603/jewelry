@@ -49,6 +49,11 @@ MediSmart-v2-style backup and activation, adapted for Aurum. Branch:
   "Drive is missing"). A folder outside Google Drive is rejected
   with a clear message, so a local folder can never be saved as
   the "Drive" folder and silently make cloud backup phone-only.
+  The "last cloud backup" date belongs to the currently connected
+  folder — changing the folder clears it, so it never shows an
+  upload that went to the previous folder — and a failed upload
+  shows its specific reason in Settings (could not create the
+  file, write failed, permission lost), instead of only "pending".
   SAF was chosen because an Android
   OAuth client is tied to the package name + SHA-1 signing
   fingerprint, and CI builds are DEBUG APKs with a disposable debug
@@ -141,7 +146,7 @@ key  = SHA256(code      | salt | KEY)    first 8 chars, uppercase
 ## Tests
 
 `tests/backup.test.ts` (8 tests), `tests/restore.test.ts` (3 tests),
-`tests/cloudBackup.test.ts` (23 tests) and
+`tests/cloudBackup.test.ts` (26 tests) and
 `tests/offlineActivation.test.ts`
 (9 tests): backup creation/validation, tamper rejection, daily-due
 logic, one-file-per-year naming and per-year history, the
