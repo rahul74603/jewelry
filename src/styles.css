@@ -1109,6 +1109,45 @@ td > strong {
   background: #f4f0e4;
   color: #8f7d50;
 }
+.b-due-soon {
+  background: #fbf3df;
+  color: #997935;
+}
+.b-overdue {
+  background: #f8ebe4;
+  color: #a36b52;
+}
+.b-repaid {
+  background: #edf4e9;
+  color: #597b52;
+}
+.b-forfeited {
+  background: #f8ebe4;
+  color: #a36b52;
+}
+/* Girvi & EMI rows: label/value rows and the Girvi/EMI toggle. */
+.seg-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.kv-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 5px;
+  border-bottom: 1px solid #edf0e9;
+  font-size: 13px;
+}
+.kv-row:last-child {
+  border-bottom: 0;
+}
+.kv-row small {
+  display: block;
+  color: var(--muted);
+  font-weight: 400;
+}
 .badge i {
   width: 4px;
   height: 4px;
