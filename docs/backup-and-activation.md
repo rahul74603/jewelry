@@ -39,7 +39,17 @@ MediSmart-v2-style backup and activation, adapted for Aurum. Branch:
   through the Storage Access Framework and the permission is kept
   by the native `DriveFolder` plugin
   (`android/app/src/main/java/com/aurum/jewellery/DriveFolderPlugin.java`,
-  `src/lib/cloudBackup.ts`). SAF was chosen because an Android
+  `src/lib/cloudBackup.ts`). The picker is opened with My Drive as
+  the initial location (the Drive provider's roots are queried for
+  the "My Drive" root; if that query comes back empty — it can do
+  so even with Drive installed, when Drive was never opened or
+  signed in — the fallback is My Drive's well-known "root"
+  document, and the picker still opens so the shopkeeper can reach
+  Drive from its drawer menu; a missing root is never read as
+  "Drive is missing"). A folder outside Google Drive is rejected
+  with a clear message, so a local folder can never be saved as
+  the "Drive" folder and silently make cloud backup phone-only.
+  SAF was chosen because an Android
   OAuth client is tied to the package name + SHA-1 signing
   fingerprint, and CI builds are DEBUG APKs with a disposable debug
   signing key, so no registered OAuth client could ever match them
@@ -138,8 +148,8 @@ logic, one-file-per-year naming and per-year history, the
 6-collection shape; whole-workspace restore (valid backup round-trips,
 bad payloads throw, voided flags survive); cloud backup (folder pick,
 yearly-file upload, pending/retry on failure, permission-lost
-handling, restore from Drive, disconnect, clear failure when the
-Drive app is missing); code/key derivation,
+handling, restore from Drive, disconnect, rejection of a folder
+outside Drive); code/key derivation,
 verification, wrong-key/secret rejection, timing-safe compare, the
 confirmed developer WhatsApp number, the master-app-key → user-app
 round-trip (two-app flow), and the licensed-flag helpers being safe

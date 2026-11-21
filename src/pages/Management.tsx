@@ -415,7 +415,9 @@ function BackupRestoreSection() {
       setError(
         message.includes("drive-app-missing")
           ? "Google Drive is not reachable on this phone — install the Google Drive app from the Play Store, then pick a folder."
-          : message,
+          : message.includes("not-drive-folder")
+            ? "That folder is on this phone, not in Google Drive — pick a folder inside Google Drive (tap ☰ in the picker and choose Google Drive)."
+            : message,
       );
     } finally {
       setBusy(false);

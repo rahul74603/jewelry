@@ -132,13 +132,15 @@ describe("picking the Drive folder", () => {
     const native = fakeNative({
       pickFolder: async () => ({
         picked: true,
-        uri: "content://com.android.externalstorage.documents/tree/primary%3ADrive",
+        uri: "content://com.google.android.apps.docs.storage/tree/0A1B2C3D4E",
         name: "Drive",
       }),
     });
     const folder = await pickCloudFolder(native, store);
     expect(folder?.name).toBe("Drive");
-    expect(loadCloudFolder(store)?.uri).toContain("content://");
+    expect(loadCloudFolder(store)?.uri).toContain(
+      "content://com.google.android.apps.docs.storage/",
+    );
     expect(getCloudStatus(store).status).toBe("connected");
   });
   it("returns null when the user cancels the picker", async () => {
@@ -147,15 +149,17 @@ describe("picking the Drive folder", () => {
     expect(folder).toBeNull();
     expect(loadCloudFolder(store)).toBeNull();
   });
-  it("fails clearly when the Drive app is missing on the phone", async () => {
+  it("rejects a folder that is on this phone, not in Google Drive", async () => {
     const { store } = memoryCloudStore();
     const native = fakeNative({
-      pickFolder: async () => {
-        throw new Error("drive-app-missing");
-      },
+      pickFolder: async () => ({
+        picked: true,
+        uri: "content://com.android.externalstorage.documents/tree/primary%3ADrive",
+        name: "Drive",
+      }),
     });
     await expect(pickCloudFolder(native, store)).rejects.toThrow(
-      "drive-app-missing",
+      "not-drive-folder",
     );
     expect(loadCloudFolder(store)).toBeNull();
   });
