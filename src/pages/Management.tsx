@@ -97,6 +97,12 @@ import {
   type SmsSentEntry,
 } from "../lib/autoSms";
 import { InvoiceTable } from "./Dashboard";
+
+/** Build version baked in by CI (VITE_APP_VERSION=1.0.<run number>);
+ * "dev" for local builds without the variable. Shown at the bottom of
+ * Settings so the shopkeeper can see which build is installed. */
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "dev";
+
 function downloadCsv(rows: (string | number)[][]) {
   const cell = (v: string | number) =>
     '"' +
@@ -1348,6 +1354,7 @@ export function Settings() {
       </form>
       <BackupRestoreSection />
       <AutoSmsSection />
+      <p className="muted">App version {APP_VERSION}</p>
     </>
   );
 }

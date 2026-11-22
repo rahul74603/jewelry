@@ -6,6 +6,12 @@ apply plugin: 'com.android.application'
 // Without the property the customer package is unchanged.
 def aurumAppIdSuffix = project.findProperty("aurumAppIdSuffix") ?: ""
 
+// Version, from the CI workflow (-PaurumVersionCode=<run number>
+// -PaurumVersionName=1.0.<run number>). Safe defaults keep local
+// builds working without the properties.
+def aurumVersionCode = (project.findProperty("aurumVersionCode") ?: "1").toInteger()
+def aurumVersionName = project.findProperty("aurumVersionName") ?: "1.0"
+
 android {
     namespace "com.aurum.jewellery"
     compileSdk rootProject.ext.compileSdkVersion
@@ -13,8 +19,14 @@ android {
         applicationId "com.aurum.jewellery" + aurumAppIdSuffix
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode aurumVersionCode
+        versionName aurumVersionName
+        // App label shows the version (e.g. "Aurum 1.0.32",
+        // "Aurum Master 1.0.32") so the shopkeeper can see on the
+        // phone which build is installed. A resValue overrides
+        // strings.xml at build time, survives `npx cap sync`, and
+        // makes the master label independent of any workflow edit.
+        resValue "string", "app_name", aurumAppIdSuffix == ".master" ? "Aurum Master ${aurumVersionName}" : "Aurum ${aurumVersionName}"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -23,7 +35,10 @@ android {
         }
     }
     buildTypes {
-        debug { applicationIdSuffix ".preview"; versionNameSuffix "-preview" }
+        // No versionNameSuffix: the native versionName must match the
+        // web version (VITE_APP_VERSION) exactly, so the label and the
+        // Settings line show the same number.
+        debug { applicationIdSuffix ".preview" }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'

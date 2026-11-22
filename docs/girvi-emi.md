@@ -71,6 +71,24 @@ total − upfront.
   poora payment ho to Record payment use karen. Settled record par aur
   payment nahi ho sakti, aur wo due list me nahi aata.
 
+## Status colours — ek nazar me rang
+
+Har record ka rang uski haalat batata hai — list me Status badge aur
+row ke left accent, dono me wahi rang hota hai (detail modal ke badge
+me bhi). Rang `loanStatusTone()` se aata hai:
+
+- **Green (hara) — clear ho gaya:** record `repaid` (balance ₹0 —
+  poora bhugtan mil gaya) ya `settled` (mamla khatam, baaki maaf).
+- **Yellow (peela) — chal raha hai:** record `active` ya `due-soon`
+  (due date 7 din ke andar) — time par hai, payment aa raha hai.
+- **Red (laal) — due pe due:** record `overdue` — due date nikal
+  gayi aur balance baki hai, mahine ka byaj judta ja raha hai.
+- **Grey (saleti) — forfeited:** record band ho gaya par payment se
+  nahi — date nikalne par item stock me gaya.
+
+"Active records" wali ginti me sirf khule hue record aate hain —
+repaid, settled aur forfeited usme nahi gine jate.
+
 ## Payment confirmations — ✓ aur receipt
 
 - Payment record karte hi confirmation dikhta hai: bada **✓ "Payment
@@ -195,7 +213,7 @@ total − upfront.
   (1 overdue girvi, 1 due-soon girvi, 1 active EMI).
 - `functions/src/server/workspace.ts`: live-mode handlers + restore
   (loans bucket, counts).
-- Tests: `tests/loans.test.ts` (46 tests — interest, buckets,
+- Tests: `tests/loans.test.ts` (51 tests — interest, buckets,
   compound, manual payment, settlement, reminders, receipt, forfeit,
-  quick-pay amounts, backup round-trip) and `tests/autoSms.test.ts`
+  quick-pay amounts, status tones, backup round-trip) and `tests/autoSms.test.ts`
   (18 tests — payload, dedup, settings, sent log).

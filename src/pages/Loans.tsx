@@ -26,6 +26,7 @@ import {
   currentMonthInterestPaise,
   dueLoans,
   loanState,
+  loanStatusTone,
   loanSummary,
   quickPayAmounts,
   receiptMessage,
@@ -629,7 +630,7 @@ function LoanDetail({ loan }: { loan: Loan }) {
             {loan.itemWeight ? ` · ${loan.itemWeight} g` : ""}
           </p>
         </div>
-        <Status text={stateText(loan)} />
+        <Status text={stateText(loan)} tone={loanStatusTone(loan)} />
       </div>
       <p className="muted">
         Start {day(loan.startAt)} · Due {day(loan.dueAt)} · Interest{" "}
@@ -971,7 +972,10 @@ export function Loans() {
         </section>
       )}
       <p className="muted">
-        {(data.loans ?? []).filter((l) => loanState(l) !== "repaid" && loanState(l) !== "forfeited").length}{" "}
+        {(data.loans ?? []).filter((l) => {
+          const s = loanState(l);
+          return s !== "repaid" && s !== "settled" && s !== "forfeited";
+        }).length}{" "}
         active records · Total balance due {rupee(totalDue, 2)}
       </p>
       <Records
@@ -979,6 +983,7 @@ export function Loans() {
         search={(l) => customerName(data, l.customerId) + " " + l.itemName}
         placeholder="Find by customer or item…"
         action={(l) => P({ item: l.id })}
+        rowClass={(l) => "tone-row-" + loanStatusTone(l)}
         columns={[
           {
             label: "Customer",
@@ -1011,7 +1016,9 @@ export function Loans() {
           },
           {
             label: "Status",
-            value: (l) => <Status text={stateText(l)} />,
+            value: (l) => (
+              <Status text={stateText(l)} tone={loanStatusTone(l)} />
+            ),
           },
         ]}
       />
