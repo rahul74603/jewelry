@@ -26,6 +26,7 @@ jobs:
     timeout-minutes: 25
     env:
       VITE_APP_MODE: demo
+      VITE_APP_VERSION: 1.0.${{ github.run_number }}
     steps:
       - uses: actions/checkout@v5
         with: { persist-credentials: false }
@@ -45,7 +46,7 @@ jobs:
       - run: npx --no-install cap sync android
       - name: Package split debug APKs (arm64 + armeabi + x86_64)
         working-directory: android
-        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug
+        run: ./gradlew --no-daemon -PaurumVersionCode=${{ github.run_number }} -PaurumVersionName=1.0.${{ github.run_number }} :app:testDebugUnitTest :app:assembleDebug
       - name: Prepare split APKs (arm64 + armeabi publish, x86_64 emulator only)
         run: |
           mkdir -p phone
@@ -67,6 +68,7 @@ jobs:
     timeout-minutes: 25
     env:
       VITE_APP_MODE: master
+      VITE_APP_VERSION: 1.0.${{ github.run_number }}
     steps:
       - uses: actions/checkout@v5
         with: { persist-credentials: false }
@@ -86,11 +88,11 @@ jobs:
       - run: npx --no-install cap sync android
       - name: Brand the master app (own package + label)
         run: |
-          sed -i 's|Aurum Workspace|Aurum Master|g' android/app/src/main/res/values/strings.xml
+          sed -i 's|Aurum Workspace|Aurum Master 1.0.${{ github.run_number }}|g' android/app/src/main/res/values/strings.xml
           grep app_name android/app/src/main/res/values/strings.xml
       - name: Package split debug APKs (arm64 + armeabi + x86_64)
         working-directory: android
-        run: ./gradlew --no-daemon -PaurumAppIdSuffix=.master :app:testDebugUnitTest :app:assembleDebug
+        run: ./gradlew --no-daemon -PaurumAppIdSuffix=.master -PaurumVersionCode=${{ github.run_number }} -PaurumVersionName=1.0.${{ github.run_number }} :app:testDebugUnitTest :app:assembleDebug
       - name: Prepare master APK (arm64 only — developer has the latest phone)
         run: |
           mkdir -p master
