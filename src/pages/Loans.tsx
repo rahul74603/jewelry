@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Check, HandCoins, MessageCircle, Plus, Scale } from "lucide-react";
 import { useShop, useToast } from "../lib/store";
@@ -27,11 +27,18 @@ import {
   dueLoans,
   loanState,
   loanSummary,
+  quickPayAmounts,
   receiptMessage,
   reminderMessage,
   todayDay,
   whatsappLink,
 } from "../../functions/src/core/loans";
+import {
+  isAutoSmsSupported,
+  loadAutoSmsSettings,
+  loadSentLog,
+  sentTodayLoanIds,
+} from "../lib/autoSms";
 
 const stateText = (l: Loan) =>
   ({
@@ -339,6 +346,128 @@ function PaymentForm({
       <div className="modal-actions">
         <button disabled={busy} className="btn primary">
           {busy ? "Saving…" : "Record payment"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Quick payment — "Payment liya" from the due list itself. Cash at
+ * the counter, one tap: the amount is pre-filled with the full
+ * balance due, with quick chips for the full balance and for this
+ * month's interest only. One confirm records it through the normal
+ * Record payment path (interest-first allocation, manual overpayment
+ * rules) — so the month list gets its ✓ and a fully-paid record
+ * drops off the due list at once.
+ */
+function QuickPayForm({
+  loan,
+  close,
+  onDone,
+}: {
+  loan: Loan;
+  close: () => void;
+  onDone: (payment: LoanPayment) => void;
+}) {
+  const { perform } = useShop(),
+    notify = useToast(),
+    [error, E] = useState(""),
+    [busy, B] = useState(false),
+    [mode, MO] = useState<TenderMode>("Cash");
+  const { fullPaise, monthInterestPaise } = quickPayAmounts(loan);
+  const rupees = (paise: number) =>
+    Number((paise / 100).toFixed(2)).toString();
+  const [amount, A] = useState(rupees(fullPaise));
+  const amountPaise = Math.round(Number(amount) * 100);
+  const over =
+    Number.isFinite(Number(amount)) && amountPaise > fullPaise
+      ? amountPaise - fullPaise
+      : 0;
+  return (
+    <form
+      onSubmit={async (e) => {
+        e.preventDefault();
+        E("");
+        const rs = Number(amount);
+        if (!Number.isFinite(rs) || rs <= 0)
+          return E("Enter the amount received.");
+        const payment: LoanPayment = {
+          id: `loanpay-${key()}`,
+          at: new Date().toISOString(),
+          amountPaise: Math.round(rs * 100),
+          mode,
+          extraPaise: Math.max(0, Math.round(rs * 100) - fullPaise),
+        };
+        try {
+          B(true);
+          await perform("loanPayment", { loanId: loan.id, payment });
+          notify("Payment recorded.");
+          onDone(payment);
+          close();
+        } catch (e2) {
+          E(err(e2));
+        } finally {
+          B(false);
+        }
+      }}
+    >
+      <div className="form-grid">
+        <Field
+          label="Amount received (₹)"
+          full
+          hint="Cash counter par liya — ek tap me record ho jayega, baad ke liye pending nahi rahega."
+        >
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={amount}
+            onChange={(e) => A(e.target.value)}
+            placeholder={`Balance due ${rupee(fullPaise, 2)}`}
+          />
+        </Field>
+        <div className="field full">
+          <span>Quick amount</span>
+          <span className="seg-row">
+            <button
+              type="button"
+              className="btn outline"
+              onClick={() => A(rupees(fullPaise))}
+            >
+              Poora bakaya {rupee(fullPaise, 2)}
+            </button>
+            <button
+              type="button"
+              className="btn outline"
+              disabled={monthInterestPaise <= 0}
+              onClick={() => A(rupees(monthInterestPaise))}
+            >
+              Sirf is mahine ka byaj {rupee(monthInterestPaise, 2)}
+            </button>
+          </span>
+        </div>
+        <Field label="Mode">
+          <Select
+            value={mode}
+            onChange={(e) => MO(e.target.value as TenderMode)}
+          >
+            {tenderModes.map((m) => (
+              <option key={m}>{m}</option>
+            ))}
+          </Select>
+        </Field>
+      </div>
+      {over > 0 && (
+        <p className="muted">
+          Ye amount balance se {rupee(over, 2)} zyada hai — extra record hoga
+          aur mamla khatam ho jayega.
+        </p>
+      )}
+      <Problem message={error} />
+      <div className="modal-actions">
+        <button disabled={busy} className="btn primary">
+          {busy ? "Saving…" : "Payment liya — record karen"}
         </button>
       </div>
     </form>
@@ -706,6 +835,26 @@ export function Loans() {
       (n, l) => n + loanSummary(l).balancePaise,
       0,
     );
+  const [sentToday, setSentToday] = useState<Set<string>>(new Set()),
+    [autoSmsOn] = useState(() => loadAutoSmsSettings().enabled),
+    [quickPay, setQuickPay] = useState<Loan | null>(null),
+    [quickReceipt, setQuickReceipt] = useState<{
+      loanId: string;
+      payment: LoanPayment;
+    } | null>(null);
+  // Record whose quick payment was just recorded — the receipt panel
+  // reads the live record, so the balance shown is post-payment, the
+  // paid month(s) already show ✓ in the detail, and a fully-paid
+  // record has already dropped off the due list.
+  const quickLoan = quickReceipt
+    ? (data.loans ?? []).find((l) => l.id === quickReceipt.loanId)
+    : undefined;
+  // Which due records got their SMS today (native sent log) — shown
+  // as "aaj SMS bhej diya ✓" so the shopkeeper knows at a glance.
+  useEffect(() => {
+    if (!isAutoSmsSupported()) return;
+    void (async () => setSentToday(sentTodayLoanIds(await loadSentLog())))();
+  }, []);
   return (
     <>
       <PageHead
@@ -718,12 +867,60 @@ export function Loans() {
           New record
         </button>
       </PageHead>
+      {quickReceipt && quickLoan && (
+        <section className="panel">
+          <div className="balance-banner">
+            <span>
+              <Check size={18} /> Payment mil gaya
+            </span>
+            <strong>{rupee(quickReceipt.payment.amountPaise, 2)}</strong>
+          </div>
+          <p className="muted">
+            {customerName(data, quickLoan.customerId)} · Ab kul bakaya{" "}
+            {rupee(loanSummary(quickLoan).balancePaise, 2)} hai.
+            {loanSummary(quickLoan).balancePaise === 0
+              ? " Mamla khatam ho gaya — record due list se hat gaya."
+              : ""}
+          </p>
+          <div className="modal-actions">
+            {data.customers.find((c) => c.id === quickLoan.customerId)
+              ?.phone && (
+              <a
+                className="btn gold"
+                href={whatsappLink(
+                  data.customers.find((c) => c.id === quickLoan.customerId)
+                    ?.phone ?? "",
+                  receiptMessage(
+                    quickLoan,
+                    quickReceipt.payment,
+                    customerName(data, quickLoan.customerId),
+                    data.profile.shopName,
+                  ),
+                )}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <MessageCircle size={15} /> WhatsApp receipt bhejen
+              </a>
+            )}
+            <button
+              className="btn outline"
+              onClick={() => setQuickReceipt(null)}
+            >
+              Theek hai
+            </button>
+          </div>
+        </section>
+      )}
       {due.length > 0 && (
         <section className="panel">
           <h2>Due today / overdue — reminder bhejen</h2>
           <p className="muted">
             Roz subah yahi list check karen. WhatsApp par tap karte hi message
             ready milega — bas send dabana hai.
+            {autoSmsOn
+              ? " Automatic SMS ON hai — roz subah 10 baje ye reminders SMS se bhi jayenge (jinka number hai)."
+              : ""}
           </p>
           <div className="pick-list">
             {due.map((l) => {
@@ -738,19 +935,35 @@ export function Loans() {
                       {" "}
                       · {loanState(l) === "overdue" ? "Overdue since" : "Due"}{" "}
                       {day(l.dueAt)} · Balance {rupee(s.balancePaise, 2)}
+                      {sentToday.has(l.id)
+                        ? " · aaj SMS bhej diya ✓"
+                        : !customer?.phone
+                          ? " · number nahi hai — SMS nahi jayega"
+                          : ""}
                     </small>
                   </span>
-                  <a
-                    className="btn gold"
-                    href={whatsappLink(
-                      customer?.phone ?? "",
-                      reminderMessage(l, name, data.profile.shopName),
-                    )}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <MessageCircle size={15} /> WhatsApp
-                  </a>
+                  <span className="seg-row">
+                    <button
+                      className="btn primary"
+                      onClick={() => {
+                        setQuickReceipt(null);
+                        setQuickPay(l);
+                      }}
+                    >
+                      Payment liya
+                    </button>
+                    <a
+                      className="btn gold"
+                      href={whatsappLink(
+                        customer?.phone ?? "",
+                        reminderMessage(l, name, data.profile.shopName),
+                      )}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <MessageCircle size={15} /> WhatsApp
+                    </a>
+                  </span>
                 </div>
               );
             })}
@@ -819,6 +1032,26 @@ export function Loans() {
         onClose={closePanel}
       >
         {selected && <LoanDetail loan={selected} />}
+      </Modal>
+      <Modal
+        open={!!quickPay}
+        title="Payment liya"
+        description={
+          quickPay
+            ? `${customerName(data, quickPay.customerId)} · ${quickPay.itemName} — balance due ${rupee(loanSummary(quickPay).balancePaise, 2)}`
+            : undefined
+        }
+        onClose={() => setQuickPay(null)}
+      >
+        {quickPay && (
+          <QuickPayForm
+            loan={quickPay}
+            close={() => setQuickPay(null)}
+            onDone={(p) =>
+              setQuickReceipt({ loanId: quickPay.id, payment: p })
+            }
+          />
+        )}
       </Modal>
     </>
   );

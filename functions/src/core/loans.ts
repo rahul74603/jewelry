@@ -292,6 +292,23 @@ export function currentMonthInterestPaise(
   return Math.round((s.outstandingPrincipalPaise * loan.interestRatePct) / 100);
 }
 
+/**
+ * Quick-pay amounts for the "Payment liya" button on the due list:
+ * the full balance due, and one month's interest on the outstanding
+ * principal. The payment itself uses the normal Record payment path
+ * (interest-first allocation, manual overpayment rules), so these are
+ * only defaults — the shopkeeper can type any amount.
+ */
+export function quickPayAmounts(
+  loan: Loan,
+  asOfDay = todayDay(),
+): { fullPaise: number; monthInterestPaise: number } {
+  return {
+    fullPaise: loanSummary(loan, asOfDay).balancePaise,
+    monthInterestPaise: currentMonthInterestPaise(loan, asOfDay),
+  };
+}
+
 export type LoanState =
   | "active"
   | "due-soon"

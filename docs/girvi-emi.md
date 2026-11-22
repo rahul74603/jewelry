@@ -84,6 +84,23 @@ total − upfront.
   isliye customer ko bhi saaf dikhta hai kya baki hai, aur aage ka
   hisaab clear rehta hai.
 
+## Quick payment — "Payment liya" (counter par ek tap)
+
+- Due list me hi har record par **"Payment liya"** button hota hai —
+  record detail kholne ki zaroorat nahi. Cash counter par lete hi ek
+  tap me record ho jata hai, "baad me kar dunga" pending nahi rehta.
+- Sheet me amount pehle se bhara hota hai: default **"Poora bakaya"**
+  (kul balance due), aur chip se **"Sirf is mahine ka byaj"** (ek
+  mahine ka charge = rate × outstanding principal) chuna ja sakta hai;
+  custom amount bhi type kar sakte hain. Mode Cash default hai.
+- Ek confirm tap normal Record payment path se jata hai — interest-first
+  allocation aur manual overpayment / settlement rules wahi rehte hain.
+  Record karte hi wahi **✓ "Payment mil gaya"** confirmation + WhatsApp
+  receipt dikhta hai, bhare hue mahine turant **✓** ho jate hain, aur
+  poora bhara hua record due list se turant hat jata hai.
+- Record detail wala **"Record payment"** form bhi waisa hi hai —
+  date/note ke sath payment ke liye.
+
 ## Reminders — in-app, WhatsApp one-tap
 
 - Due-today / overdue list Girvi & EMI page par sabse upar hoti hai.
@@ -102,9 +119,54 @@ total − upfront.
 - **WhatsApp one-tap:** button dabate hi WhatsApp khulta hai, message
   pehle se bhara hota hai — bas send dabana hai. Bina number ke link
   WhatsApp share sheet kholta hai, jahan contact chuna ja sakta hai.
-- **Automatic SMS nahi bana** (SEND_SMS permission + channel decision
-  pending) aur **native 02:00 scheduler nahi bana** — daily check
-  backup wale daily-on-open pattern par hai.
+- **Automatic SMS:** roz subah 10 baje — neeche "Automatic daily SMS"
+  section dekhen.
+
+## Automatic daily SMS — roz subah 10 baje
+
+- **Kaise kaam karta hai:** loans app ke local store me hain, jise
+  native worker seedha nahi padh sakta. Isliye har app open par JS
+  due reminders (record id, customer phone, message text) compute
+  karke native side ko deta hai (SharedPreferences me save hota hai);
+  subah 10 baje worker us payload se SMS bhejta hai. App band ho tab
+  bhi chalta hai.
+- **10:00 baje ka target:** phone ke andar ka scheduler use hota hai —
+  exact alarm (`setExactAndAllowWhileIdle`, `SCHEDULE_EXACT_ALARM`
+  permission ke sath) jab phone allow kare, warna WorkManager daily
+  work (24 ghante ka interval, 10:00 tak ka initial delay). **10:00
+  sharp ki guarantee nahi hai** — Doze / battery optimization alarm ko
+  10–15 minute (kuch phones par zyada) shift kar sakta hai. Settings me
+  battery-optimization se exempt karne ka button hai (system screen
+  khulta hai, force nahi kiya jata).
+- **Permission:** SEND_SMS permission sirf tab manga jata hai jab
+  shopkeeper Settings me auto-SMS ON kare — app launch par kabhi
+  nahi, isliye CI emulator test par koi dialog nahi aata.
+- **SIM cost:** SMS shopkeeper ke apne SIM/plan se jata hai — usually
+  unlimited pack me free. WhatsApp automatic free me possible nahi hai
+  (Business API paise leta hai), isliye SMS.
+- **Ek din me ek hi baar:** ek record ko ek din me ek hi baar SMS
+  jata hai — native sent-log me per-day mark rehta hai. Bina number
+  wale record skip hote hain (due list me "number nahi hai" dikhta
+  hai). Girvi & EMI page par "aaj SMS bhej diya ✓" bhi dikhta hai.
+- **Retry / catch-up — message kabhi khoyega nahi, next month ka
+  intezar nahi:** failed send ko "sent" nahi mana jata (us din ka mark
+  nahi lagta); worker transient failure (no signal) par `Result.retry()`
+  deta hai aur same day dobara try karta hai; jo reh gaya wo agle din
+  subah 10 baje phir try hota hai, kyunki record payment hone tak
+  due/overdue rehta hai — reminder roz repeat hota hai, mahine me ek
+  baar nahi. Failed attempts sent-log me "failed — retry pending"
+  dikhte hain. SMS ko internet nahi, mobile signal chahiye.
+- **Band karna:** toggle OFF karte hi scheduler ruk jata hai (alarm +
+  WorkManager cancel). Default OFF hai.
+- **Test SMS:** Settings se apne number par ek test SMS bhej kar check
+  kar sakte hain.
+- Files: `android/app/src/main/java/com/aurum/jewellery/` —
+  `SmsReminderPlugin.java`, `SmsSender.java`, `SmsSentReceiver.java`,
+  `SmsReminderStore.java`, `ReminderWorker.java`,
+  `SmsReminderScheduler.java`, `SmsAlarmReceiver.java`,
+  `SmsBootReceiver.java`; `src/lib/autoSms.ts` (payload, settings,
+  sent-log); Settings me `AutoSmsSection` (`src/pages/Management.tsx`).
+  Tests: `tests/autoSms.test.ts`.
 
 ## Backup & restore
 
@@ -128,11 +190,12 @@ total − upfront.
   `"loanCompound"`.
 - `functions/src/core/loans.ts`: pure logic (interest, month buckets,
   compound, summary, states, due list, reminder text, receipt text,
-  WhatsApp link, forfeited product).
+  WhatsApp link, forfeited product, quick-pay amounts).
 - `src/lib/demo.ts`: `demoMutation` cases + 3 sample records
   (1 overdue girvi, 1 due-soon girvi, 1 active EMI).
 - `functions/src/server/workspace.ts`: live-mode handlers + restore
   (loans bucket, counts).
-- Tests: `tests/loans.test.ts` (42 tests — interest, buckets,
+- Tests: `tests/loans.test.ts` (46 tests — interest, buckets,
   compound, manual payment, settlement, reminders, receipt, forfeit,
-  backup round-trip).
+  quick-pay amounts, backup round-trip) and `tests/autoSms.test.ts`
+  (18 tests — payload, dedup, settings, sent log).

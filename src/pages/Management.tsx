@@ -19,6 +19,10 @@ import {
   Cloud,
   CloudOff,
   CloudDownload,
+  MessageCircle,
+  BellRing,
+  BatteryCharging,
+  RefreshCw,
 } from "lucide-react";
 import { useShop, useToast } from "../lib/store";
 import { rupee, cash, err, day } from "../lib/format";
@@ -74,6 +78,24 @@ import {
   accountDocuments,
   allocations,
 } from "../../functions/src/core/documents";
+import {
+  isAutoSmsSupported,
+  loadAutoSmsSettings,
+  saveAutoSmsSettings,
+  prepareAutoSms,
+  cancelAutoSms,
+  checkSmsPermission,
+  requestSmsPermission,
+  sendTestSms,
+  loadSentLog,
+  loadAutoSmsStatus,
+  openBatteryOptimizationSettings,
+  openExactAlarmSettings,
+  smsFailureText,
+  type AutoSmsSettings,
+  type AutoSmsStatus,
+  type SmsSentEntry,
+} from "../lib/autoSms";
 import { InvoiceTable } from "./Dashboard";
 function downloadCsv(rows: (string | number)[][]) {
   const cell = (v: string | number) =>
@@ -747,6 +769,238 @@ function BackupRestoreSection() {
     </section>
   );
 }
+const timeOf = (iso: string) =>
+  new Date(iso).toLocaleTimeString("en-IN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Kolkata",
+  });
+
+/**
+ * Automatic SMS reminders (Settings). Toggle default OFF. Turning it
+ * on asks for the SMS runtime permission — only here, never on app
+ * launch — then hands today's due list to the native scheduler,
+ * which sends it at 10:00 AM from the shopkeeper's own SIM. The
+ * sent log below shows what actually went out, and what failed with
+ * a retry pending.
+ */
+function AutoSmsSection() {
+  const { data } = useShop(),
+    notify = useToast(),
+    [settings, setSettings] = useState<AutoSmsSettings>(() =>
+      loadAutoSmsSettings(),
+    ),
+    [status, setStatus] = useState<AutoSmsStatus | null>(null),
+    [log, setLog] = useState<SmsSentEntry[]>([]),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  const supported = isAutoSmsSupported();
+  const refresh = async () => {
+    if (!supported) return;
+    setStatus(await loadAutoSmsStatus());
+    setLog(await loadSentLog());
+  };
+  useEffect(() => {
+    if (!isAutoSmsSupported()) return;
+    void (async () => {
+      setStatus(await loadAutoSmsStatus());
+      setLog(await loadSentLog());
+    })();
+  }, []);
+  const toggle = async (next: boolean) => {
+    setError("");
+    if (!supported) return;
+    setBusy(true);
+    try {
+      if (next) {
+        const already = await checkSmsPermission();
+        const granted = already.granted
+          ? true
+          : (await requestSmsPermission()).granted;
+        if (!granted) {
+          setError(
+            "SMS permission nahi mili — phone ki Settings → Apps → Aurum → Permissions me SMS allow karen, phir dobara try karen.",
+          );
+          return;
+        }
+        saveAutoSmsSettings({ enabled: true });
+        setSettings({ enabled: true });
+        const prepared = await prepareAutoSms(data);
+        await refresh();
+        notify(
+          prepared.prepared
+            ? `Automatic SMS reminder ON — roz subah 10 baje ${prepared.count} due customers ko SMS jayega.`
+            : "Automatic SMS reminder ON — agali baar app khulne par schedule hoga.",
+        );
+      } else {
+        saveAutoSmsSettings({ enabled: false });
+        setSettings({ enabled: false });
+        await cancelAutoSms();
+        await refresh();
+        notify("Automatic SMS reminder OFF — ab subah SMS nahi jayega.");
+      }
+    } catch (e) {
+      setError(err(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const testSms = async () => {
+    setError("");
+    setBusy(true);
+    try {
+      const sent = await sendTestSms(data.profile.mobile, data.profile.shopName);
+      if (sent) {
+        await refresh();
+        notify("Test SMS bhej diya — apne phone par check karen.");
+      } else {
+        setError(
+          "Test SMS nahi gaya — SMS permission ya mobile number check karen.",
+        );
+      }
+    } catch (e) {
+      setError(err(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="panel settings-panel">
+      <div className="section-kicker">
+        <i />
+        AUTOMATIC SMS REMINDERS
+      </div>
+      <h2>Roz subah 10 baje automatic SMS</h2>
+      <p className="muted">
+        Due girvi / EMI records ke customers ko roz subah 10 baje SMS
+        jayega — wahi message jo Girvi &amp; EMI page par banta hai
+        (bakaya + baki mahine ka byaj + kul). SMS aapke phone ke SIM /
+        plan se jayega — unlimited pack me usually free. Har record ko
+        ek din me ek hi SMS. SMS ko internet nahi, mobile signal
+        chahiye.
+      </p>
+      {!supported && (
+        <p className="muted">
+          Automatic SMS sirf Android app me kaam karta hai — web build
+          me nahi.
+        </p>
+      )}
+      <label className="check-line full">
+        <input
+          type="checkbox"
+          checked={settings.enabled}
+          disabled={busy || !supported}
+          onChange={(e) => void toggle(e.target.checked)}
+        />
+        Roz subah 10 baje automatic SMS reminder
+      </label>
+      <p className="muted">
+        10:00 sharp ki guarantee nahi hai — exact alarm mile to 10:00
+        baje jayega, warna subah ke aas-paas (Doze / battery saving ki
+        wajah se shift ho sakta hai). Kuch phones (Infinix, Xiaomi)
+        battery saving me background kaam rok dete hain — app ko
+        battery optimization se bahar rakhen aur autostart allow karen.
+        Agar 10 baje signal na ho ya phone band ho, to SMS lose nahi
+        hota: thodi der me dobara try hota hai, aur jo reh gaya wo
+        agle din subah 10 baje phir jayega — record due rehta hai jab
+        tak payment na ho, reminder roz repeat hota hai, mahine me ek
+        baar nahi.
+      </p>
+      {settings.enabled && status && (
+        <p className="muted">
+          Status:{" "}
+          {status.smsGranted
+            ? "SMS permission mili hui"
+            : "SMS permission nahi hai — dobara allow karen"}
+          {" · "}
+          {status.mode === "exact"
+            ? "10:00 baje exact alarm se chalega"
+            : status.mode === "periodic"
+              ? "10:00 ke aas-paas chalega (exact alarm ki permission nahi hai)"
+              : "schedule nahi hua — app dobara kholen"}
+        </p>
+      )}
+      {settings.enabled && status?.mode === "periodic" && (
+        <div className="settings-actions">
+          <span>
+            10:00 sharp ke liye phone ko exact alarm allow karna hoga.
+          </span>
+          <button
+            className="btn outline"
+            disabled={busy}
+            onClick={() => void openExactAlarmSettings()}
+          >
+            <BellRing size={15} />
+            Alarms &amp; reminders allow karen
+          </button>
+        </div>
+      )}
+      <div className="settings-actions">
+        <span>
+          {data.profile.mobile
+            ? `Test SMS dukaan ke number (${data.profile.mobile}) par jayega.`
+            : "Test SMS ke liye pehle Shop profile me apna mobile number dalen."}
+        </span>
+        <button
+          className="btn outline"
+          disabled={busy || !supported || !data.profile.mobile}
+          onClick={() => void testSms()}
+        >
+          <MessageCircle size={15} />
+          Test SMS bhejen
+        </button>
+        <button
+          className="btn outline"
+          disabled={busy || !supported}
+          onClick={() => void openBatteryOptimizationSettings()}
+        >
+          <BatteryCharging size={15} />
+          Battery optimization se bahar rakhen
+        </button>
+      </div>
+      <h3 className="spaced">Bheje gaye SMS (sent log)</h3>
+      {log.length === 0 ? (
+        <p className="muted">Abhi tak koi SMS nahi bheja gaya.</p>
+      ) : (
+        <div className="pick-list">
+          {log.slice(0, 10).map((e) => (
+            <div
+              key={`${e.sendId ?? e.sentAt}-${e.loanId}`}
+              className="kv-row"
+            >
+              <span>
+                <strong>{e.customerName}</strong> · {e.phone}
+                <small>
+                  {" "}
+                  · {day(new Date(e.sentAt).getTime())} {timeOf(e.sentAt)}
+                </small>
+              </span>
+              <b>
+                {e.status === "sent"
+                  ? "✓ sent"
+                  : e.status === "sending"
+                    ? "… sending"
+                    : `✗ failed — ${smsFailureText(e.reason)}${e.retryPending ? " · retry pending" : ""}`}
+              </b>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="settings-actions">
+        <span>Log native side se aata hai — bheja gaya SMS hi dikhta hai.</span>
+        <button
+          className="btn outline"
+          disabled={busy || !supported}
+          onClick={() => void refresh()}
+        >
+          <RefreshCw size={15} />
+          Refresh
+        </button>
+      </div>
+      <Problem message={error} />
+    </section>
+  );
+}
 export function Settings() {
   const { data, perform, demo, license } = useShop(),
     notify = useToast(),
@@ -1093,6 +1347,7 @@ export function Settings() {
         </div>
       </form>
       <BackupRestoreSection />
+      <AutoSmsSection />
     </>
   );
 }

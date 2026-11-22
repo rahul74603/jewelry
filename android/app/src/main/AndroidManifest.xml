@@ -33,9 +33,42 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!-- Automatic daily SMS reminders (10:00 AM): the sent-result
+             receiver and the exact-alarm receiver only ever hear this
+             app's own broadcasts; the boot receiver re-arms the 10:00
+             alarm after a reboot (exact alarms do not survive one). -->
+        <receiver
+            android:name=".SmsSentReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.aurum.jewellery.SMS_SENT" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name=".SmsAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.aurum.jewellery.SMS_REMINDER_ALARM" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name=".SmsBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Automatic SMS reminders: sent from the shopkeeper's own SIM. -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <!-- 10:00 AM exact alarm (Android 12+); the shopkeeper grants it
+         in Settings → "Alarms & reminders". Without it the reminder
+         falls back to WorkManager periodic work (best-effort). -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 </manifest>
