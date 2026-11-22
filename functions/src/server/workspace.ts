@@ -23,6 +23,8 @@ import {
   loanSchema,
   loanPaymentInputSchema,
   loanForfeitInputSchema,
+  loanSettleInputSchema,
+  loanCompoundInputSchema,
 } from "../core/model";
 import {
   forfeitedProduct,
@@ -374,14 +376,67 @@ export async function shopAction(
       snap = await tx.get(ref);
     if (!snap.exists) throw Error("Girvi / EMI record not found.");
     const l = snap.data() as Loan;
-    if (l.status !== "active")
+    if (l.status === "forfeited")
       throw Error("This record is forfeited — no more payments.");
+    if (l.status === "settled")
+      throw Error("This record is settled (mamla khatam) — no more payments.");
     if (loanSummary(l).balancePaise <= 0)
       throw Error("This record is fully repaid.");
-    if (payment.amountPaise > loanSummary(l).balancePaise)
-      throw Error("Payment is more than the balance due.");
-    tx.set(ref, { ...l, payments: [...l.payments, payment] });
+    // Manual payment: any amount is allowed. Excess over the balance
+    // at the payment date is recorded as extra and closes the record
+    // as repaid — the record never goes negative.
+    const balance = loanSummary(l, payment.at.slice(0, 10)).balancePaise;
+    const extra = Math.max(0, payment.amountPaise - balance);
+    tx.set(ref, {
+      ...l,
+      payments: [...l.payments, { ...payment, extraPaise: extra }],
+    });
     log("Girvi / EMI payment recorded", loanId);
+    return { ok: true };
+  }
+  if (action === "loanSettle") {
+    const { loanId, payment } = loanSettleInputSchema.parse(raw);
+    const ref = record("loans", loanId),
+      snap = await tx.get(ref);
+    if (!snap.exists) throw Error("Girvi / EMI record not found.");
+    const l = snap.data() as Loan;
+    if (l.status !== "active")
+      throw Error("Only an active record can be settled.");
+    const balance = loanSummary(l, payment.at.slice(0, 10)).balancePaise;
+    if (balance <= 0) throw Error("This record is fully repaid.");
+    if (payment.amountPaise >= balance)
+      throw Error(
+        "Settlement amount must be less than the balance due — for a full payment, use Record payment.",
+      );
+    tx.set(ref, {
+      ...l,
+      payments: [
+        ...l.payments,
+        {
+          ...payment,
+          note: payment.note?.trim()
+            ? payment.note
+            : "Settlement — mamla khatam",
+        },
+      ],
+      status: "settled",
+      settledAt: date,
+      settlementAmountPaise: payment.amountPaise,
+      waivedPaise: balance - payment.amountPaise,
+    });
+    log("Girvi / EMI settled — mamla khatam", loanId);
+    return { ok: true };
+  }
+  if (action === "loanCompound") {
+    const { loanId, compound } = loanCompoundInputSchema.parse(raw);
+    const ref = record("loans", loanId),
+      snap = await tx.get(ref);
+    if (!snap.exists) throw Error("Girvi / EMI record not found.");
+    const l = snap.data() as Loan;
+    if (l.status !== "active")
+      throw Error("Only an active record can change the interest type.");
+    tx.set(ref, { ...l, compound });
+    log("Girvi / EMI interest type changed", loanId);
     return { ok: true };
   }
   if (action === "loanForfeit") {

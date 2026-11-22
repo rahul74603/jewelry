@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { HandCoins, MessageCircle, Plus, Scale } from "lucide-react";
+import { Check, HandCoins, MessageCircle, Plus, Scale } from "lucide-react";
 import { useShop, useToast } from "../lib/store";
 import { rupee, day, err, key } from "../lib/format";
 import { useClosePanel } from "../lib/navigation";
@@ -19,6 +19,7 @@ import {
   loanSchema,
   tenderModes,
   type Loan,
+  type LoanPayment,
   type TenderMode,
 } from "../../functions/src/core/model";
 import {
@@ -26,6 +27,7 @@ import {
   dueLoans,
   loanState,
   loanSummary,
+  receiptMessage,
   reminderMessage,
   todayDay,
   whatsappLink,
@@ -38,6 +40,7 @@ const stateText = (l: Loan) =>
     overdue: "Overdue",
     repaid: "Repaid",
     forfeited: "Forfeited",
+    settled: "Settled",
   })[loanState(l)];
 
 function customerName(data: { customers: { id: string; name: string }[] }, id: string) {
@@ -59,6 +62,7 @@ function LoanForm({ close }: { close: () => void }) {
     [total, T] = useState(""),
     [upfront, U] = useState(""),
     [rate, R] = useState("2"),
+    [compound, CP] = useState(false),
     [startAt, S] = useState(todayDay()),
     [dueAt, D] = useState(
       new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
@@ -99,6 +103,7 @@ function LoanForm({ close }: { close: () => void }) {
         totalPaise: Math.round(totalRs * 100),
         upfrontPaise: Math.round(upfrontRs * 100),
         interestRatePct: ratePct,
+        compound,
         startAt,
         dueAt,
         payments: [],
@@ -215,6 +220,16 @@ function LoanForm({ close }: { close: () => void }) {
             onChange={(e) => R(e.target.value)}
           />
         </Field>
+        <Field label="Chakravarti byaj (compound)" hint="OFF ho to simple byaj — sirf principal par. ON ho to baki byaj par bhi byaj lagega.">
+          <label className="check-line">
+            <input
+              type="checkbox"
+              checked={compound}
+              onChange={(e) => CP(e.target.checked)}
+            />
+            Compound interest ON karen
+          </label>
+        </Field>
         <Field label="Start date">
           <input type="date" value={startAt} onChange={(e) => S(e.target.value)} />
         </Field>
@@ -224,7 +239,9 @@ function LoanForm({ close }: { close: () => void }) {
       </div>
       <p className="muted">
         {kind === "girvi"
-          ? "Byaj mahine ka simple hoga, bakaya rakam par. Date tak pure paise wapas na aaye to record overdue hoga aur aap ek tap se item ko dukaan ka kar sakte hain."
+          ? compound
+            ? "Chakravarti byaj ON hai — har mahine baki byaj par bhi byaj lagega. Date tak pure paise wapas na aaye to record overdue hoga aur aap ek tap se item ko dukaan ka kar sakte hain."
+            : "Byaj mahine ka simple hoga, bakaya rakam par. Date tak pure paise wapas na aaye to record overdue hoga aur aap ek tap se item ko dukaan ka kar sakte hain."
           : "Koi fixed kist nahi — customer jab chahe jitna chahe de sakta hai. Har payment pehle byaj me, phir principal me jayegi."}
       </p>
       <Problem message={error} />
@@ -237,7 +254,15 @@ function LoanForm({ close }: { close: () => void }) {
   );
 }
 
-function PaymentForm({ loan, close }: { loan: Loan; close: () => void }) {
+function PaymentForm({
+  loan,
+  close,
+  onDone,
+}: {
+  loan: Loan;
+  close: () => void;
+  onDone: (payment: LoanPayment) => void;
+}) {
   const { data, perform } = useShop(),
     notify = useToast(),
     [error, E] = useState(""),
@@ -247,6 +272,10 @@ function PaymentForm({ loan, close }: { loan: Loan; close: () => void }) {
     [date, DT] = useState(todayDay()),
     [note, NO] = useState("");
   const balance = loanSummary(loan).balancePaise;
+  const amountPaise = Math.round(Number(amount) * 100);
+  const over = Number.isFinite(Number(amount)) && amountPaise > balance
+    ? amountPaise - balance
+    : 0;
   return (
     <form
       onSubmit={async (e) => {
@@ -254,21 +283,19 @@ function PaymentForm({ loan, close }: { loan: Loan; close: () => void }) {
         E("");
         const rs = Number(amount);
         if (!Number.isFinite(rs) || rs <= 0) return E("Enter the amount received.");
-        if (Math.round(rs * 100) > balance)
-          return E(`Payment cannot be more than the balance due (${rupee(balance, 2)}).`);
+        const payment: LoanPayment = {
+          id: `loanpay-${key()}`,
+          at: new Date(`${date}T12:00:00`).toISOString(),
+          amountPaise: Math.round(rs * 100),
+          mode,
+          ...(note.trim() ? { note: note.trim() } : {}),
+          extraPaise: Math.max(0, Math.round(rs * 100) - balance),
+        };
         try {
           B(true);
-          await perform("loanPayment", {
-            loanId: loan.id,
-            payment: {
-              id: `loanpay-${key()}`,
-              at: new Date(`${date}T12:00:00`).toISOString(),
-              amountPaise: Math.round(rs * 100),
-              mode,
-              ...(note.trim() ? { note: note.trim() } : {}),
-            },
-          });
+          await perform("loanPayment", { loanId: loan.id, payment });
           notify("Payment recorded.");
+          onDone(payment);
           close();
         } catch (e2) {
           E(err(e2));
@@ -278,7 +305,7 @@ function PaymentForm({ loan, close }: { loan: Loan; close: () => void }) {
       }}
     >
       <div className="form-grid">
-        <Field label="Amount received (₹)">
+        <Field label="Amount received (₹)" hint="Manual payment — koi bhi amount, balance se zyada bhi de sakte hain. Zyada amount extra record hoga aur mamla khatam ho jayega.">
           <input
             type="number"
             min="0"
@@ -302,10 +329,111 @@ function PaymentForm({ loan, close }: { loan: Loan; close: () => void }) {
           <input value={note} onChange={(e) => NO(e.target.value)} placeholder="e.g. byaj ke liye" />
         </Field>
       </div>
+      {over > 0 && (
+        <p className="muted">
+          Ye amount balance se {rupee(over, 2)} zyada hai — extra record hoga
+          aur mamla khatam ho jayega.
+        </p>
+      )}
       <Problem message={error} />
       <div className="modal-actions">
         <button disabled={busy} className="btn primary">
           {busy ? "Saving…" : "Record payment"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function SettlementForm({
+  loan,
+  close,
+  onDone,
+}: {
+  loan: Loan;
+  close: () => void;
+  onDone: (payment: LoanPayment) => void;
+}) {
+  const { data, perform } = useShop(),
+    notify = useToast(),
+    [error, E] = useState(""),
+    [busy, B] = useState(false),
+    [amount, A] = useState(""),
+    [mode, MO] = useState<TenderMode>("Cash"),
+    [date, DT] = useState(todayDay()),
+    [note, NO] = useState("");
+  const balance = loanSummary(loan).balancePaise;
+  const amountPaise = Math.round(Number(amount) * 100);
+  const waived =
+    Number.isFinite(Number(amount)) && amountPaise > 0 && amountPaise < balance
+      ? balance - amountPaise
+      : 0;
+  return (
+    <form
+      onSubmit={async (e) => {
+        e.preventDefault();
+        E("");
+        const rs = Number(amount);
+        if (!Number.isFinite(rs) || rs <= 0) return E("Enter the settlement amount.");
+        if (Math.round(rs * 100) >= balance)
+          return E(
+            `Settlement amount must be less than the balance due (${rupee(balance, 2)}) — for a full payment, use Record payment.`,
+          );
+        const payment: LoanPayment = {
+          id: `loanpay-${key()}`,
+          at: new Date(`${date}T12:00:00`).toISOString(),
+          amountPaise: Math.round(rs * 100),
+          mode,
+          note: note.trim() ? note.trim() : "Settlement — mamla khatam",
+          extraPaise: 0,
+        };
+        try {
+          B(true);
+          await perform("loanSettle", { loanId: loan.id, payment });
+          notify("Mamla khatam — record settled.");
+          onDone(payment);
+          close();
+        } catch (e2) {
+          E(err(e2));
+        } finally {
+          B(false);
+        }
+      }}
+    >
+      <div className="form-grid">
+        <Field label="Settlement amount (₹)" hint={`Balance due ${rupee(balance, 2)} — isse kam amount par mamla khatam hoga, baaki maaf ho jayega.`}>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={amount}
+            onChange={(e) => A(e.target.value)}
+            placeholder={`Less than ${rupee(balance, 2)}`}
+          />
+        </Field>
+        <Field label="Mode">
+          <Select value={mode} onChange={(e) => MO(e.target.value as TenderMode)}>
+            {tenderModes.map((m) => (
+              <option key={m}>{m}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Date">
+          <input type="date" value={date} onChange={(e) => DT(e.target.value)} />
+        </Field>
+        <Field label="Note (optional)">
+          <input value={note} onChange={(e) => NO(e.target.value)} placeholder="e.g. mamla khatam" />
+        </Field>
+      </div>
+      {waived > 0 && (
+        <p className="muted">
+          Mamla khatam hoga — {rupee(waived, 2)} maaf ho jayega.
+        </p>
+      )}
+      <Problem message={error} />
+      <div className="modal-actions">
+        <button disabled={busy} className="btn primary">
+          {busy ? "Saving…" : "Mamla khatam karen"}
         </button>
       </div>
     </form>
@@ -317,10 +445,17 @@ function LoanDetail({ loan }: { loan: Loan }) {
     notify = useToast(),
     [error, E] = useState(""),
     [showPay, SP] = useState(false),
+    [showSettle, SS] = useState(false),
     [confirmForfeit, CF] = useState(false),
-    [busy, B] = useState(false);
+    [busy, B] = useState(false),
+    [compoundBusy, CB] = useState(false),
+    [receipt, setReceipt] = useState<null | {
+      payment: LoanPayment;
+      settled: boolean;
+    }>(null);
   const s = loanSummary(loan),
     state = loanState(loan),
+    isOpen = state === "active" || state === "due-soon" || state === "overdue",
     name = customerName(data, loan.customerId),
     customer = data.customers.find((c) => c.id === loan.customerId),
     msg = reminderMessage(loan, name, data.profile.shopName);
@@ -335,6 +470,22 @@ function LoanDetail({ loan }: { loan: Loan }) {
     } finally {
       B(false);
       CF(false);
+    }
+  };
+  const toggleCompound = async (next: boolean) => {
+    E("");
+    try {
+      CB(true);
+      await perform("loanCompound", { loanId: loan.id, compound: next });
+      notify(
+        next
+          ? "Compound interest ON — baki byaj par bhi byaj lagega."
+          : "Compound interest OFF — ab simple byaj lagega.",
+      );
+    } catch (e) {
+      E(err(e));
+    } finally {
+      CB(false);
     }
   };
   return (
@@ -354,14 +505,67 @@ function LoanDetail({ loan }: { loan: Loan }) {
       <p className="muted">
         Start {day(loan.startAt)} · Due {day(loan.dueAt)} · Interest{" "}
         {loan.interestRatePct}% per month (manual)
+        {loan.compound ? " · Compound (chakravarti) ON" : " · Simple"}
         {loan.status === "forfeited" &&
           loan.forfeitedAt &&
           ` · Forfeited ${day(loan.forfeitedAt)} — item moved to stock`}
+        {loan.status === "settled" &&
+          loan.settledAt &&
+          ` · Settled ${day(loan.settledAt)} — mamla khatam`}
       </p>
-      <div className="balance-banner">
-        <span>Balance due</span>
-        <strong>{rupee(s.balancePaise, 2)}</strong>
-      </div>
+      {receipt && (
+        <>
+          <div className="balance-banner">
+            <span>
+              <Check size={18} />{" "}
+              {receipt.settled ? "Mamla khatam ho gaya" : "Payment mil gaya"}
+            </span>
+            <strong>{rupee(receipt.payment.amountPaise, 2)}</strong>
+          </div>
+          <p className="muted">
+            Ab kul bakaya {rupee(s.balancePaise, 2)} hai.
+            {receipt.settled && loan.waivedPaise
+              ? ` ${rupee(loan.waivedPaise, 2)} maaf kiya gaya.`
+              : ""}
+          </p>
+          <div className="modal-actions">
+            <a
+              className="btn gold"
+              href={whatsappLink(
+                customer?.phone ?? "",
+                receiptMessage(loan, receipt.payment, name, data.profile.shopName),
+              )}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <MessageCircle size={15} /> WhatsApp receipt bhejen
+            </a>
+          </div>
+        </>
+      )}
+      {state === "settled" ? (
+        <div className="balance-banner">
+          <span>Mamla khatam — settlement mila</span>
+          <strong>{rupee(loan.settlementAmountPaise ?? 0, 2)}</strong>
+        </div>
+      ) : (
+        <div className="balance-banner">
+          <span>Balance due</span>
+          <strong>{rupee(s.balancePaise, 2)}</strong>
+        </div>
+      )}
+      {isOpen && (
+        <label className="check-line spaced">
+          <input
+            type="checkbox"
+            checked={loan.compound ?? false}
+            disabled={compoundBusy}
+            onChange={(e) => void toggleCompound(e.target.checked)}
+          />
+          Chakravarti byaj (compound){" "}
+          {loan.compound ? "ON — baki byaj par bhi byaj lagega" : "OFF — sirf principal par byaj lagega"}
+        </label>
+      )}
       <div className="pick-list">
         {(
           [
@@ -370,7 +574,17 @@ function LoanDetail({ loan }: { loan: Loan }) {
             ["Interest accrued till today", rupee(s.interestAccruedPaise, 2)],
             ["Interest outstanding", rupee(s.outstandingInterestPaise, 2)],
             ["This month's interest", rupee(currentMonthInterestPaise(loan), 2)],
+            ["Interest type", loan.compound ? "Compound (chakravarti)" : "Simple"],
             ["Paid so far", rupee(s.paidPaise, 2)],
+            ...(s.extraPaidPaise > 0
+              ? ([["Extra paid (balance se zyada)", rupee(s.extraPaidPaise, 2)]] as const)
+              : []),
+            ...(loan.status === "settled"
+              ? ([
+                  ["Settlement amount", rupee(loan.settlementAmountPaise ?? 0, 2)],
+                  ["Waived (maaf kiya)", rupee(loan.waivedPaise ?? 0, 2)],
+                ] as const)
+              : []),
           ] as const
         ).map(([label, value]) => (
           <div key={label} className="kv-row">
@@ -379,13 +593,38 @@ function LoanDetail({ loan }: { loan: Loan }) {
           </div>
         ))}
       </div>
+      <h3 className="spaced">Mahine-wise byaj</h3>
+      <div className="pick-list">
+        {s.buckets.map((b) => (
+          <div key={b.dueDay} className="kv-row">
+            <span>
+              {b.label} ka byaj
+              {b.unpaidPaise === 0 && (
+                <>
+                  {" "}
+                  <Check size={15} /> paid
+                </>
+              )}
+            </span>
+            <b>
+              {rupee(b.interestPaise, 2)}
+              {b.unpaidPaise > 0 && ` · baki ${rupee(b.unpaidPaise, 2)}`}
+              {b.waivedPaise > 0 && ` · maaf ${rupee(b.waivedPaise, 2)}`}
+            </b>
+          </div>
+        ))}
+        {!s.buckets.length && (
+          <Empty title="Abhi tak byaj nahi bana hai" text="Poora mahina hone par har mahine ka byaj yahan aayega." />
+        )}
+      </div>
       <h3 className="spaced">Payment history</h3>
       <div className="pick-list">
         {[...loan.payments].reverse().map((p) => (
           <div key={p.id} className="kv-row">
             <span>
-              {day(p.at)} · {p.mode}
+              <Check size={15} /> {day(p.at)} · {p.mode}
               {p.note ? ` · ${p.note}` : ""}
+              {p.extraPaise > 0 ? ` · Extra ${rupee(p.extraPaise, 2)}` : ""}
             </span>
             <b>{rupee(p.amountPaise, 2)}</b>
           </div>
@@ -396,10 +635,13 @@ function LoanDetail({ loan }: { loan: Loan }) {
       </div>
       <Problem message={error} />
       <div className="modal-actions">
-        {state !== "repaid" && state !== "forfeited" && (
+        {isOpen && (
           <>
-            <button className="btn primary" onClick={() => SP((v) => !v)}>
+            <button className="btn primary" onClick={() => { SP((v) => !v); SS(false); }}>
               Record payment
+            </button>
+            <button className="btn outline" onClick={() => { SS((v) => !v); SP(false); }}>
+              Mamla khatam (settlement)
             </button>
             <a
               className="btn gold"
@@ -411,7 +653,7 @@ function LoanDetail({ loan }: { loan: Loan }) {
             </a>
           </>
         )}
-        {loan.kind === "girvi" && state !== "forfeited" && state !== "repaid" && (
+        {loan.kind === "girvi" && isOpen && (
           <button
             disabled={busy}
             className="btn danger"
@@ -423,13 +665,31 @@ function LoanDetail({ loan }: { loan: Loan }) {
           </button>
         )}
       </div>
-      {showPay && state !== "repaid" && state !== "forfeited" && (
-        <PaymentForm loan={loan} close={() => SP(false)} />
+      {showPay && isOpen && (
+        <PaymentForm
+          loan={loan}
+          close={() => SP(false)}
+          onDone={(p) => setReceipt({ payment: p, settled: false })}
+        />
+      )}
+      {showSettle && isOpen && (
+        <SettlementForm
+          loan={loan}
+          close={() => SS(false)}
+          onDone={(p) => setReceipt({ payment: p, settled: true })}
+        />
       )}
       {state === "forfeited" && (
         <p className="muted">
           Forfeited — the collateral is now shop stock (see Inventory, category
           “Forfeited”).
+        </p>
+      )}
+      {state === "settled" && (
+        <p className="muted">
+          Mamla khatam — settlement {rupee(loan.settlementAmountPaise ?? 0, 2)}{" "}
+          mila aur {rupee(loan.waivedPaise ?? 0, 2)} maaf kiya gaya. Is record
+          par aur payment nahi ho sakti.
         </p>
       )}
     </>

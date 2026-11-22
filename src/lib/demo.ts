@@ -18,6 +18,8 @@ import {
   loanSchema,
   loanPaymentInputSchema,
   loanForfeitInputSchema,
+  loanSettleInputSchema,
+  loanCompoundInputSchema,
 } from "../../functions/src/core/model";
 import {
   forfeitedProduct,
@@ -160,6 +162,7 @@ export function seedDemo(): Workspace {
       totalPaise: 2000000,
       upfrontPaise: 0,
       interestRatePct: 2,
+      compound: false,
       startAt: dayISO(-75),
       dueAt: dayISO(-5),
       payments: [],
@@ -178,6 +181,7 @@ export function seedDemo(): Workspace {
       totalPaise: 5000000,
       upfrontPaise: 0,
       interestRatePct: 2,
+      compound: false,
       startAt: dayISO(-40),
       dueAt: dayISO(5),
       payments: [
@@ -186,6 +190,7 @@ export function seedDemo(): Workspace {
           at: atISO(-10),
           amountPaise: 200000,
           mode: "Cash" as const,
+          extraPaise: 0,
         },
       ],
       status: "active" as const,
@@ -203,6 +208,7 @@ export function seedDemo(): Workspace {
       totalPaise: 15120000,
       upfrontPaise: 5120000,
       interestRatePct: 1.5,
+      compound: false,
       startAt: dayISO(-60),
       dueAt: dayISO(30),
       payments: [
@@ -211,6 +217,7 @@ export function seedDemo(): Workspace {
           at: atISO(-30),
           amountPaise: 1000000,
           mode: "UPI" as const,
+          extraPaise: 0,
         },
       ],
       status: "active" as const,
@@ -376,15 +383,49 @@ export function demoMutation(
     const { loanId, payment } = loanPaymentInputSchema.parse(raw);
     const l = d.loans.find((x) => x.id === loanId);
     if (!l) throw Error("Girvi / EMI record not found.");
-    if (l.status !== "active")
+    if (l.status === "forfeited")
       throw Error("This record is forfeited — no more payments.");
+    if (l.status === "settled")
+      throw Error("This record is settled (mamla khatam) — no more payments.");
     if (loanSummary(l).balancePaise <= 0)
       throw Error("This record is fully repaid.");
     if (payment.at.slice(0, 10) < l.startAt)
       throw Error("Payment cannot be before the start date.");
-    if (payment.amountPaise > loanSummary(l).balancePaise)
-      throw Error("Payment is more than the balance due.");
-    l.payments.push(payment);
+    // Manual payment: any amount is allowed. Excess over the balance
+    // at the payment date is recorded as extra and closes the record
+    // as repaid — the record never goes negative.
+    const balance = loanSummary(l, payment.at.slice(0, 10)).balancePaise;
+    const extra = Math.max(0, payment.amountPaise - balance);
+    l.payments.push({ ...payment, extraPaise: extra });
+  } else if (action === "loanSettle") {
+    const { loanId, payment } = loanSettleInputSchema.parse(raw);
+    const l = d.loans.find((x) => x.id === loanId);
+    if (!l) throw Error("Girvi / EMI record not found.");
+    if (l.status !== "active")
+      throw Error("Only an active record can be settled.");
+    if (payment.at.slice(0, 10) < l.startAt)
+      throw Error("Payment cannot be before the start date.");
+    const balance = loanSummary(l, payment.at.slice(0, 10)).balancePaise;
+    if (balance <= 0) throw Error("This record is fully repaid.");
+    if (payment.amountPaise >= balance)
+      throw Error(
+        "Settlement amount must be less than the balance due — for a full payment, use Record payment.",
+      );
+    l.payments.push({
+      ...payment,
+      note: payment.note?.trim() ? payment.note : "Settlement — mamla khatam",
+    });
+    l.status = "settled";
+    l.settledAt = at;
+    l.settlementAmountPaise = payment.amountPaise;
+    l.waivedPaise = balance - payment.amountPaise;
+  } else if (action === "loanCompound") {
+    const { loanId, compound } = loanCompoundInputSchema.parse(raw);
+    const l = d.loans.find((x) => x.id === loanId);
+    if (!l) throw Error("Girvi / EMI record not found.");
+    if (l.status !== "active")
+      throw Error("Only an active record can change the interest type.");
+    l.compound = compound;
   } else if (action === "loanForfeit") {
     const { loanId, note } = loanForfeitInputSchema.parse(raw);
     const l = d.loans.find((x) => x.id === loanId);

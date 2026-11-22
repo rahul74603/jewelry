@@ -18,21 +18,35 @@ nahi.** Fields: customer, item, item price (total), upfront paid,
 **manual interest rate (% per month)**, payments, status. Principal =
 total − upfront.
 
-## Interest — manual, simple, monthly
+## Interest — manual, simple by default, compound on request
 
 - Byaj rate **har record par shopkeeper apne hisab se dalta hai**
   (0–100% per month) aur record banne ke baad kabhi nahi badalta.
-- **Monthly simple interest on the outstanding principal.** Interest
-  per completed calendar month lagta hai: 15 Oct ko shuru hua loan par
+- **Monthly interest on the outstanding principal.** Interest per
+  completed calendar month lagta hai: 15 Oct ko shuru hua loan par
   15 Nov ko 1 mahine ka byaj, 14 Nov ko 0.
 - **Payment pehle byaj me, phir principal me jati hai.** Isliye byaj
   time par bharne se principal nahi ghatta, aur extra payment se
   principal ghatta hai — aur aage ke mahino ka byaj bhi kam ho jata
   hai.
+- **Mahine-wise byaj:** har poora mahina ek bucket hai — label us
+  mahine ka naam hai jis din byaj poora hua ("July", "September").
+  Payment sabse purane bucket se pehle bharta hai. Record detail me
+  har mahine ki line dikhti hai: byaj kitna, ✓ jab poora bhara, baki
+  kitna.
+- **Chakravarti byaj (compound) — per record ON/OFF, default OFF.**
+  OFF ho to simple byaj: har mahine sirf outstanding principal par.
+  ON ho to har mahine ki boundary par baki byaj principal me jud
+  jata hai, aur agle mahine ka byaj principal + baki byaj par lagta
+  hai. Example: ₹1,00,000 @2% — simple: 2 mahine me ₹4,000;
+  compound: ₹2,000 + ₹2,040 = ₹4,040. Toggle add-record form me aur
+  record detail me hai — badalne par poora record phir se hisaab
+  hota hai (shuru se, naye niyam se). Sirf active record par badal
+  sakta hai.
 - Har record dikhata hai: principal, aaj tak ka byaj, kul due, ab tak
   bhara, balance. Pure hisaab `functions/src/core/loans.ts` me hai
-  (`loanSummary`, `wholeMonthsBetween`) — demo mutation, server
-  handler aur UI teeno wahi use karte hain.
+  (`loanSummary`, `wholeMonthsBetween`, `monthBoundaries`) — demo
+  mutation, server handler aur UI teeno wahi use karte hain.
 
 ## Due dates, overdue, forfeit (girvi only)
 
@@ -46,16 +60,45 @@ total − upfront.
   jata hai** (Inventory, category “Forfeited”, 1 pc, cost = forfeit ke
   time ka balance). EMI record forfeit nahi ho sakta; pura bhugtan
   hone par record `repaid` hota hai.
-- Forfeited record par aur payment nahi ho sakti; payment balance se
-  zyada ki nahi ho sakti.
+- Forfeited record par aur payment nahi ho sakti.
+- **Manual payment:** Record payment me koi bhi amount dala ja sakta
+  hai — balance se zyada bhi. Zyada amount extra record hota hai aur
+  record repaid ho jata hai (balance kabhi negative nahi hota).
+- **Mamla khatam (settlement):** balance se kam amount dekar mamla
+  khatam kiya ja sakta hai. Record `settled` ho jata hai, settlement
+  amount payment ki tarah record hota hai, aur baaki rakam waived
+  (maaf) dikhti hai. Settlement amount balance se kam hona chahiye —
+  poora payment ho to Record payment use karen. Settled record par aur
+  payment nahi ho sakti, aur wo due list me nahi aata.
+
+## Payment confirmations — ✓ aur receipt
+
+- Payment record karte hi confirmation dikhta hai: bada **✓ "Payment
+  mil gaya"** + amount + baki balance, aur **WhatsApp receipt** button
+  — receipt me customer ka naam, amount, date aur baki bakaya hota
+  hai ("Namaste X ji, [shop] ko ₹Y mila — dhanyavad! [date] ko
+  payment mila. Ab kul bakaya ₹Z hai."). Settlement par receipt me
+  "Mamla khatam — ₹W maaf kar diya gaya" bhi likha hota hai.
+- Payment history ki har entry par **✓** hota hai, aur mahine-wise
+  byaj list me har mahine par **✓** jab uska byaj poora bhara ho —
+  isliye customer ko bhi saaf dikhta hai kya baki hai, aur aage ka
+  hisaab clear rehta hai.
 
 ## Reminders — in-app, WhatsApp one-tap
 
 - Due-today / overdue list Girvi & EMI page par sabse upar hoti hai.
-- Har due record ke liye Hindi message banta hai:
-  “Namaste [name] ji, aapka [shop] me ₹X bakaya hai. Is mahine ka
-  byaj ₹Y bana, kul ₹Z ho gaya hai. Kripya jald bhugtan karein.”
-  (X = outstanding principal, Y = is mahine ka byaj, Z = kul due.)
+- Har due record ke liye Hindi message banta hai. Sirf **baki (unpaid)
+  mahine** naam se likhe jate hain:
+  “Namaste [name] ji, aapka [shop] me ₹X bakaya hai. July aur
+  September ka byaj mila kar ₹Z hua, kul ₹W ho gaya hai. Kripya jald
+  bhugtan karein.”
+  (X = outstanding principal, Z = ab tak ka poora baki byaj,
+  W = kul due.)
+- Agar abhi tak koi byaj nahi bana hai (poora mahina nahi hua), to
+  message saaf likhta hai: “Abhi tak byaj nahi bana hai, kul ₹X hai.”
+  — pehle wali wording ("is mahine ka byaj bana") confusing thi,
+  kyunki lagta tha wo byaj kul me jud gaya hai, jabki poora mahina
+  hone se pehle wo judta nahi.
 - **WhatsApp one-tap:** button dabate hi WhatsApp khulta hai, message
   pehle se bhara hota hai — bas send dabana hai. Bina number ke link
   WhatsApp share sheet kholta hai, jahan contact chuna ja sakta hai.
@@ -71,17 +114,25 @@ total − upfront.
   restore inhe wapas lata hai. Is module se pehle ke backup (jinme
   loans nahi hai) ab bhi restore hote hain — unke liye `loans: []`
   bhar diya jata hai.
+- Naye fields (compound flag, settled status + waived amount, payment
+  ka extra) bhi backup/restore se guzarte hain. Inse pehle ke backup
+  jinme ye fields nahi hain, ab bhi restore hote hain — compound
+  default OFF, status active, extra 0.
 
 ## Data model
 
 - `functions/src/core/model.ts`: `loanSchema`, `loanPaymentSchema`,
-  `loanPaymentInputSchema`, `loanForfeitInputSchema`; `Workspace.loans`;
-  Actions `"loan"`, `"loanPayment"`, `"loanForfeit"`.
-- `functions/src/core/loans.ts`: pure logic (interest, summary,
-  states, due list, reminder text, WhatsApp link, forfeited product).
+  `loanPaymentInputSchema`, `loanForfeitInputSchema`,
+  `loanSettleInputSchema`, `loanCompoundInputSchema`; `Workspace.loans`;
+  Actions `"loan"`, `"loanPayment"`, `"loanForfeit"`, `"loanSettle"`,
+  `"loanCompound"`.
+- `functions/src/core/loans.ts`: pure logic (interest, month buckets,
+  compound, summary, states, due list, reminder text, receipt text,
+  WhatsApp link, forfeited product).
 - `src/lib/demo.ts`: `demoMutation` cases + 3 sample records
   (1 overdue girvi, 1 due-soon girvi, 1 active EMI).
 - `functions/src/server/workspace.ts`: live-mode handlers + restore
   (loans bucket, counts).
-- Tests: `tests/loans.test.ts` (24 tests — interest, allocation,
-  overdue, forfeit, backup round-trip).
+- Tests: `tests/loans.test.ts` (42 tests — interest, buckets,
+  compound, manual payment, settlement, reminders, receipt, forfeit,
+  backup round-trip).

@@ -151,6 +151,9 @@ export const loanPaymentSchema = z.object({
   amountPaise: z.number().int().positive().max(100_000_000_00),
   mode: z.enum(tenderModes),
   note: z.string().trim().max(200).optional(),
+  /** Extra above the total due at payment time (manual overpayment) —
+   * recorded when a payment closes the record, never negative. */
+  extraPaise: z.number().int().nonnegative().default(0),
 });
 export type LoanPayment = z.infer<typeof loanPaymentSchema>;
 /** A girvi (pawn) loan or an EMI (instalment) sale. The interest rate
@@ -161,7 +164,11 @@ export type LoanPayment = z.infer<typeof loanPaymentSchema>;
  * into stock. EMI: the customer takes a gold item, pays some upfront,
  * and pays the rest in flexible instalments — any amount, any time,
  * no fixed instalment. For EMI, principal + upfront = total price;
- * for girvi, total = principal and upfront is 0. */
+ * for girvi, total = principal and upfront is 0. Compound (chakravarti
+ * byaj) is OFF by default — when ON, unpaid interest is added to the
+ * principal at each month boundary. A record can close three ways:
+ * fully repaid (balance 0), forfeited (girvi only), or settled
+ * (mamla khatam — closed at a smaller amount, the rest waived). */
 export const loanSchema = z
   .object({
     id,
@@ -178,14 +185,23 @@ export const loanSchema = z
     upfrontPaise: z.number().int().nonnegative(),
     /** Manual monthly interest rate, % per month. */
     interestRatePct: z.number().min(0).max(100).multipleOf(0.01),
+    /** Chakravarti byaj — when ON, unpaid interest capitalises at
+     * each month boundary, so later months charge interest on
+     * principal + unpaid interest. Default OFF (simple interest). */
+    compound: z.boolean().default(false),
     /** Calendar dates (YYYY-MM-DD). */
     startAt: z.string().date(),
     /** Validity / due date: repay in full by this date. */
     dueAt: z.string().date(),
     payments: z.array(loanPaymentSchema).max(500),
-    status: z.enum(["active", "forfeited"]),
+    status: z.enum(["active", "forfeited", "settled"]),
     forfeitedAt: z.string().datetime().optional(),
     forfeitNote: z.string().trim().max(200).optional(),
+    /** Settlement (mamla khatam): amount actually received, and the
+     * part of the balance waived to close the record. */
+    settledAt: z.string().datetime().optional(),
+    settlementAmountPaise: z.number().int().nonnegative().optional(),
+    waivedPaise: z.number().int().nonnegative().optional(),
     createdAt: z.string().datetime(),
   })
   .refine((l) => l.kind !== "girvi" || l.itemWeight > 0, {
@@ -221,6 +237,19 @@ export const loanPaymentInputSchema = z.object({
 export const loanForfeitInputSchema = z.object({
   loanId: id,
   note: z.string().trim().max(200).optional(),
+});
+/** Mamla khatam (settlement): close the record with a payment smaller
+ * than the balance due — the rest is waived. The payment is recorded
+ * like any other payment, with the settlement amounts on the record. */
+export const loanSettleInputSchema = z.object({
+  loanId: id,
+  payment: loanPaymentSchema,
+});
+/** Flip the chakravarti byaj (compound) toggle on an active record.
+ * The whole record is recalculated from the start with the new rule. */
+export const loanCompoundInputSchema = z.object({
+  loanId: id,
+  compound: z.boolean(),
 });
 export const invoiceSchema = z.object({
   id,
@@ -391,6 +420,8 @@ export type Action =
   | "loan"
   | "loanPayment"
   | "loanForfeit"
+  | "loanSettle"
+  | "loanCompound"
   | "restore";
 
 /** A full workspace snapshot as stored in a backup file. Invoices are
