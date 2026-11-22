@@ -210,9 +210,22 @@ export function PageHead({
     </header>
   );
 }
-export function Status({ text }: { text: string }) {
+export function Status({
+  text,
+  tone,
+}: {
+  text: string;
+  /** Optional explicit colour ("green" | "yellow" | "red" | "grey") —
+   * overrides the text-derived badge colour. Used by Girvi & EMI,
+   * where the tone comes from loanStatusTone(). */
+  tone?: string;
+}) {
   return (
-    <span className={"badge b-" + text.toLowerCase().replace(/\s+/g, "-")}>
+    <span
+      className={
+        "badge b-" + text.toLowerCase().replace(/\s+/g, "-") + (tone ? " tone-" + tone : "")
+      }
+    >
       <i />
       {text}
     </span>
@@ -247,6 +260,7 @@ export function Records<T extends { id: string }>({
   empty = "No matching records",
   pageSize = 8,
   filters,
+  rowClass,
 }: {
   items: T[];
   columns: Column<T>[];
@@ -257,6 +271,8 @@ export function Records<T extends { id: string }>({
   empty?: string;
   pageSize?: number;
   filters?: ReactNode;
+  /** Optional extra class per row (e.g. a status-colour accent). */
+  rowClass?: (r: T) => string;
 }) {
   const [query, Q] = useState(""),
     [sort, S] = useState<{ i: number; desc: boolean } | null>(null),
@@ -326,7 +342,10 @@ export function Records<T extends { id: string }>({
               {data.slice(cur * pageSize, (cur + 1) * pageSize).map((r) => (
                 <tr
                   key={r.id}
-                  className={action ? "clickable" : ""}
+                  className={
+                    (action ? "clickable" : "") +
+                    (rowClass ? " " + rowClass(r) : "")
+                  }
                   onClick={() => action?.(r)}
                   tabIndex={action ? 0 : undefined}
                   onKeyDown={(e) => {

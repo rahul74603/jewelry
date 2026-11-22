@@ -10,6 +10,7 @@ import {
   dueLoans,
   isOverdue,
   loanState,
+  loanStatusTone,
   loanSummary,
   monthBoundaries,
   quickPayAmounts,
@@ -323,6 +324,66 @@ describe("due dates", () => {
       status: "forfeited",
     });
     expect(dueLoans([repaid, forfeited], "2026-11-01")).toEqual([]);
+  });
+});
+
+describe("loanStatusTone", () => {
+  it("is green for a fully repaid record — Meera's two payments", () => {
+    // Principal ₹20,000 @2% from 8 Sep 2026: Oct ₹400 + Nov ₹400 = ₹800
+    // interest. Two cash payments today (₹20,400 + ₹400 = ₹20,800) clear
+    // principal + interest, so the balance is 0 and the record is repaid.
+    const l = loan({
+      startAt: "2026-09-08",
+      dueAt: "2026-11-17",
+      principalPaise: 2000000,
+      totalPaise: 2000000,
+      payments: [
+        {
+          id: "loanpay-a",
+          at: "2026-11-22T06:30:00.000Z",
+          amountPaise: 2040000,
+          mode: "Cash",
+        },
+        {
+          id: "loanpay-b",
+          at: "2026-11-22T06:35:00.000Z",
+          amountPaise: 40000,
+          mode: "Cash",
+        },
+      ],
+    });
+    expect(loanSummary(l, "2026-11-22").balancePaise).toBe(0);
+    expect(loanState(l, "2026-11-22")).toBe("repaid");
+    expect(loanStatusTone(l, "2026-11-22")).toBe("green");
+  });
+  it("is green for a settled record", () => {
+    expect(
+      loanStatusTone(
+        loan({
+          status: "settled",
+          settledAt: "2026-10-20T06:30:00.000Z",
+          settlementAmountPaise: 8000000,
+          waivedPaise: 2000000,
+        }),
+        "2026-11-01",
+      ),
+    ).toBe("green");
+  });
+  it("is yellow for an active record and for due-soon", () => {
+    expect(loanStatusTone(loan(), "2026-11-01")).toBe("yellow");
+    expect(
+      loanStatusTone(loan({ dueAt: "2026-11-05" }), "2026-11-01"),
+    ).toBe("yellow");
+  });
+  it("is red for an overdue record with a balance", () => {
+    expect(
+      loanStatusTone(loan({ dueAt: "2026-10-15" }), "2026-11-01"),
+    ).toBe("red");
+  });
+  it("is grey for a forfeited record", () => {
+    expect(
+      loanStatusTone(loan({ status: "forfeited" }), "2026-11-01"),
+    ).toBe("grey");
   });
 });
 

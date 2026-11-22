@@ -171,3 +171,22 @@ without browser storage.
   and the artifact is a long-published release, so this was a transient
   runner-side download failure; re-triggered as Run #25 with no code
   change.
+
+## App version — har build par version
+
+Har CI build ka apna version hota hai, taaki pata rahe phone me kaun
+sa build install hai aur kaun sa aane wala hai:
+
+- **Scheme:** versionName `1.0.<run number>` (jaise `1.0.32`),
+  versionCode = run number. Workflow build se pehle
+  `VITE_APP_VERSION=1.0.<run number>` set karta hai aur Gradle ko
+  `-PaurumVersionCode=<run number> -PaurumVersionName=1.0.<run number>`
+  deta hai; `android/app/build.gradle` inhe properties se padhta hai
+  (bina properties ke local build `1.0` / code `1` use karta hai).
+- **Phone par dikhta hai:** app label me version hota hai ("Aurum
+  1.0.32" / "Aurum Master 1.0.32" — Gradle `resValue` se, `strings.xml`
+  override karke), aur Settings ke neeche bhi chhota sa "App version
+  1.0.32" likha hota hai (Master app me bhi footer me). Debug build me
+  `versionNameSuffix "-preview"` hata diya gaya hai, taaki native
+  versionName web version se bilkul match kare — label aur Settings
+  dono me wahi number dikhe.

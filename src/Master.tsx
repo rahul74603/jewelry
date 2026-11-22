@@ -7,6 +7,10 @@ import {
 import { err } from "./lib/format";
 import { Brand, Field, Problem } from "./components/ui";
 
+/** Build version baked in by CI (VITE_APP_VERSION=1.0.<run number>);
+ * "dev" for local builds without the variable. */
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "dev";
+
 /**
  * Master app (VITE_APP_MODE=master) — the developer's key tool, as a
  * separate build from the user app.
@@ -119,6 +123,9 @@ export default function Master() {
               The master secret is known only to the developer — it is
               never shown here. Codes and keys only match when the same
               secret is in the user app build and here.
+            </p>
+            <p className="footnote">
+              Aurum Master · App version {APP_VERSION}
             </p>
           </div>
         </section>

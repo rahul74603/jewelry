@@ -1125,6 +1125,39 @@ td > strong {
   background: #f8ebe4;
   color: #a36b52;
 }
+/* Girvi & EMI status tones (loanStatusTone) — explicit colours that
+ * override the text-derived .b-* badge colour. Green = clear
+ * (repaid/settled), yellow = chal raha hai (active/due soon),
+ * red = overdue (due pe due), grey = forfeited. */
+.tone-green {
+  background: #edf4e9;
+  color: #597b52;
+}
+.tone-yellow {
+  background: #fbf3df;
+  color: #997935;
+}
+.tone-red {
+  background: #f8ebe4;
+  color: #a36b52;
+}
+.tone-grey {
+  background: #eef0ea;
+  color: #5f6a5f;
+}
+/* Same tones as a coloured left accent on Girvi & EMI list rows. */
+.records tbody tr.tone-row-green td:first-child {
+  box-shadow: inset 4px 0 0 #6b9e72;
+}
+.records tbody tr.tone-row-yellow td:first-child {
+  box-shadow: inset 4px 0 0 #c19a2e;
+}
+.records tbody tr.tone-row-red td:first-child {
+  box-shadow: inset 4px 0 0 #b06a4a;
+}
+.records tbody tr.tone-row-grey td:first-child {
+  box-shadow: inset 4px 0 0 #9aa39a;
+}
 /* Girvi & EMI rows: label/value rows and the Girvi/EMI toggle. */
 .seg-row {
   display: flex;

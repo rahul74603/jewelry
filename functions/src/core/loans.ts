@@ -331,6 +331,22 @@ export function isOverdue(loan: Loan, asOfDay = todayDay()): boolean {
   return loanState(loan, asOfDay) === "overdue";
 }
 
+export type LoanTone = "green" | "yellow" | "red" | "grey";
+
+/** Colour of a record at a glance, for the Girvi & EMI list and detail:
+ * green = clear ho gaya (repaid / settled), yellow = chal raha hai
+ * (active / due soon — time par hai), red = overdue (due date nikal
+ * gayi aur balance baki hai — due pe due, payment nahi aa raha),
+ * grey = forfeited (band ho gaya par payment se nahi — item stock
+ * me gaya). */
+export function loanStatusTone(loan: Loan, asOfDay = todayDay()): LoanTone {
+  const s = loanState(loan, asOfDay);
+  if (s === "repaid" || s === "settled") return "green";
+  if (s === "overdue") return "red";
+  if (s === "forfeited") return "grey";
+  return "yellow";
+}
+
 /** Records that need a reminder today: overdue first, then due within
  * 7 days. Repaid and forfeited records never appear. */
 export function dueLoans(loans: Loan[], asOfDay = todayDay()): Loan[] {
