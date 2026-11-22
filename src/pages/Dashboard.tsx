@@ -41,6 +41,7 @@ import {
   loadBackupPreferences,
   runDailyCheck,
 } from "../lib/backup";
+import { prepareAutoSms } from "../lib/autoSms";
 import {
   dueLoans,
   loanState,
@@ -296,11 +297,22 @@ export default function Dashboard() {
     }
   }, []);
   const hi = data.profile.language === "hi";
+  // Automatic daily SMS reminders (10:00 AM): hand today's due list
+  // to the native scheduler on every app open, so the payload stays
+  // fresh — a payment can only be recorded by opening the app, which
+  // refreshes the payload, so a paid record is never messaged twice.
+  // Best-effort: prepareAutoSms never throws and never asks for any
+  // permission (the SMS permission is only asked from the Settings
+  // toggle). The in-app due list below is the fallback.
+  useEffect(() => {
+    void prepareAutoSms(data);
+  }, [data]);
   // Daily-on-open girvi / EMI check (same pattern as the backup
   // reminder above): every morning the shopkeeper sees which records
-  // are due today or overdue, with the balance still owed. No native
-  // scheduler, no automatic messages — the reminder list lives on the
-  // Girvi & EMI page with a WhatsApp one-tap button per record.
+  // are due today or overdue, with the balance still owed. When
+  // automatic SMS is ON in Settings, the same list is also handed to
+  // the native scheduler above, which sends it by SMS at 10:00 AM —
+  // the reminder list here and on the Girvi & EMI page is the fallback.
   const due = useMemo(() => dueLoans(data.loans ?? []), [data.loans]),
     dueBalance = due.reduce((n, l) => n + loanSummary(l).balancePaise, 0),
     overdueCount = due.filter((l) => loanState(l) === "overdue").length;

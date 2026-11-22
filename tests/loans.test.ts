@@ -12,6 +12,7 @@ import {
   loanState,
   loanSummary,
   monthBoundaries,
+  quickPayAmounts,
   receiptMessage,
   reminderMessage,
   whatsappLink,
@@ -594,6 +595,61 @@ describe("receipt message", () => {
     expect(msg).toContain("₹0");
     expect(msg).toContain("Mamla khatam");
     expect(msg).toContain("₹14,000 maaf");
+  });
+});
+
+describe("quick-pay amount defaults (Payment liya)", () => {
+  // Default test loan: ₹1,00,000 principal at 2% a month, from 1 Sep 2026.
+  it("prefills the full balance and one month's interest", () => {
+    const { fullPaise, monthInterestPaise } = quickPayAmounts(
+      loan(),
+      "2026-11-01",
+    );
+    // 2 completed months × ₹2,000 = ₹4,000 interest → ₹1,04,000 due.
+    expect(fullPaise).toBe(10400000);
+    // One month's charge on the outstanding principal: 2% × ₹1,00,000.
+    expect(monthInterestPaise).toBe(200000);
+  });
+  it("before the first month completes the full balance is just the principal", () => {
+    const { fullPaise, monthInterestPaise } = quickPayAmounts(
+      loan(),
+      "2026-09-15",
+    );
+    expect(fullPaise).toBe(10000000);
+    expect(monthInterestPaise).toBe(200000);
+  });
+  it("after a payment the defaults shrink with the outstanding principal", () => {
+    const l = loan({
+      payments: [
+        {
+          id: "loanpay-a",
+          at: "2026-10-01T06:30:00.000Z",
+          amountPaise: 5200000,
+          mode: "Cash",
+        },
+      ],
+    });
+    const { fullPaise, monthInterestPaise } = quickPayAmounts(l, "2026-11-01");
+    // ₹52,000 paid on 1 Oct: ₹2,000 settled the first month's interest,
+    // ₹50,000 cut the principal to ₹50,000; the next month's interest
+    // is 2% × ₹50,000 = ₹1,000 → ₹51,000 due.
+    expect(fullPaise).toBe(5100000);
+    expect(monthInterestPaise).toBe(100000);
+  });
+  it("a fully-paid record has nothing to quick-pay", () => {
+    const l = loan({
+      payments: [
+        {
+          id: "loanpay-a",
+          at: "2026-11-01T06:30:00.000Z",
+          amountPaise: 10400000,
+          mode: "Cash",
+        },
+      ],
+    });
+    const { fullPaise, monthInterestPaise } = quickPayAmounts(l, "2026-11-01");
+    expect(fullPaise).toBe(0);
+    expect(monthInterestPaise).toBe(0);
   });
 });
 
