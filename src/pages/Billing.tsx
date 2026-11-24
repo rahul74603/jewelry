@@ -32,6 +32,7 @@ import {
   type TenderMode,
   type FinalizeInput,
   type Invoice,
+  type Draft,
   type InvoiceInput,
   type LineInput,
   type Product,
@@ -74,9 +75,13 @@ import {
   GemMark,
 } from "../components/ui";
 export function Invoices() {
-  const { data } = useShop();
+  const { data, perform } = useShop(),
+    notify = useToast();
   const nav = useNavigate(),
-    [tab, T] = useState("Invoices");
+    [tab, T] = useState("Invoices"),
+    [deleting, setDeleting] = useState<Draft | null>(null),
+    [busy, B] = useState(false),
+    [error, E] = useState("");
   const invoices = [...data.invoices]
     .filter((i) => (i.type === "Estimate") === (tab === "Estimates"))
     .sort((a, b) => b.issuedAt.localeCompare(a.issuedAt));
@@ -92,6 +97,7 @@ export function Invoices() {
           New invoice
         </Link>
       </PageHead>
+      <Problem message={error} />
       <div className="tabs">
         {["Invoices", "Estimates", "Drafts"].map((t) => (
           <button
@@ -131,6 +137,22 @@ export function Invoices() {
               sort: (d) => d.updatedAt,
             },
             { label: "Items", value: (d) => d.items.length },
+            {
+              label: "",
+              value: (d) => (
+                <button
+                  className="icon-btn"
+                  aria-label="Delete draft"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDeleting(d);
+                  }}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  <Trash2 size={16} />
+                </button>
+              ),
+            },
           ]}
           empty="No draft bills"
         />
@@ -176,6 +198,38 @@ export function Invoices() {
           ]}
         />
       )}
+      <Modal
+        open={deleting !== null}
+        onClose={() => setDeleting(null)}
+        title="Delete this draft?"
+      >
+        <p className="muted">
+          This unsaved draft will be permanently deleted. Finalized
+          bills are not affected.
+        </p>
+        <div className="modal-actions">
+          <button
+            className="btn danger"
+            disabled={busy}
+            onClick={async () => {
+              if (!deleting) return;
+              B(true);
+              try {
+                await perform("deleteDraft", { id: deleting.id });
+                setDeleting(null);
+                notify("Draft deleted.");
+              } catch (e) {
+                E(err(e));
+                setDeleting(null);
+              } finally {
+                B(false);
+              }
+            }}
+          >
+            {busy ? "Deleting…" : "Yes, delete draft"}
+          </button>
+        </div>
+      </Modal>
     </>
   );
 }
@@ -898,8 +952,10 @@ export function InvoiceDetail() {
     b = data.invoices.find((x) => x.id === id),
     [params] = useSearchParams(),
     note = params.has("credit") ? b?.creditNote : undefined,
-    notify = useToast();
+    notify = useToast(),
+    nav = useNavigate();
   const [voiding, V] = useState(false),
+    [deleting, setDeleting] = useState(false),
     [reason, R] = useState(""),
     [error, E] = useState(""),
     [busy, B] = useState(false);
@@ -1013,6 +1069,15 @@ export function InvoiceDetail() {
             Void document
           </button>
         )}
+        {!b.voidedAt && !b.convertedTo && (
+          <button
+            className="btn danger-outline"
+            onClick={() => setDeleting(true)}
+          >
+            <Trash2 size={14} />
+            Delete permanently
+          </button>
+        )}
       </div>
       <Modal
         open={voiding}
@@ -1057,6 +1122,40 @@ export function InvoiceDetail() {
             </button>
           </div>
         </form>
+      </Modal>
+      <Modal
+        open={deleting}
+        onClose={() => setDeleting(false)}
+        title="Delete this bill permanently?"
+      >
+        <p className="muted">
+          {b.number} will be gone for good — the bill, its payments and
+          its stock movements are deleted, and no record is left to
+          audit. Stock is restored, like a void — but unlike a void,
+          nothing is kept. Use “Void document” instead if you need an
+          audit trail.
+        </p>
+        <div className="modal-actions">
+          <button
+            className="btn danger"
+            disabled={busy}
+            onClick={async () => {
+              B(true);
+              try {
+                await perform("deleteInvoice", { id: b.id });
+                notify("Bill deleted permanently.");
+                nav("/billing");
+              } catch (e) {
+                E(err(e));
+                setDeleting(false);
+              } finally {
+                B(false);
+              }
+            }}
+          >
+            {busy ? "Deleting…" : "Yes, delete permanently"}
+          </button>
+        </div>
       </Modal>
     </>
   );

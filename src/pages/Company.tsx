@@ -58,6 +58,7 @@ export default function Company() {
     [pid, P] = useState(""),
     [token, K] = useState<{ code: string; expiresAt: number } | null>(null),
     [deviceCode, setDeviceCode] = useState(""),
+    [deviceId, setDeviceId] = useState(""),
     [masterSecret, setMasterSecret] = useState(""),
     [unlockKey, setUnlockKey] = useState(""),
     notify = useToast();
@@ -266,10 +267,12 @@ export default function Company() {
                 <h2>Offline unlock</h2>
                 <p className="muted">
                   A shopkeeper on a new device sends you their 8-character
-                  device code on WhatsApp. Paste it here with the master
-                  secret to generate their unlock key, then send the key back.
-                  The key unlocks that device locally only — it does not grant
-                  the live server workspace.
+                  device code and 12-character Device ID on WhatsApp — or
+                  as a screenshot of the lock screen. Paste both here with
+                  the master secret to generate their unlock key, then send
+                  the key back. The key unlocks only the phone with that
+                  Device ID, locally only — it does not grant the live
+                  server workspace.
                 </p>
                 <div className="form-grid">
                   <Field label="Device code from the shopkeeper">
@@ -280,6 +283,20 @@ export default function Company() {
                       placeholder="e.g. A1B2C3D4"
                       onChange={(e) =>
                         setDeviceCode(e.target.value.toUpperCase())
+                      }
+                    />
+                  </Field>
+                  <Field
+                    label="Device ID from the shopkeeper"
+                    hint="From the lock screen, next to the device code — dashes optional."
+                  >
+                    <input
+                      value={deviceId}
+                      maxLength={14}
+                      autoComplete="off"
+                      placeholder="e.g. ABCD-1234-EF01"
+                      onChange={(e) =>
+                        setDeviceId(e.target.value.toUpperCase())
                       }
                     />
                   </Field>
@@ -316,7 +333,11 @@ export default function Company() {
                       B(true);
                       try {
                         setUnlockKey(
-                          await generateUnlockKey(deviceCode, masterSecret),
+                          await generateUnlockKey(
+                            deviceCode,
+                            deviceId,
+                            masterSecret,
+                          ),
                         );
                       } catch (e) {
                         E(err(e));
@@ -346,7 +367,8 @@ export default function Company() {
                     </button>
                     <p className="footnote">
                       Send this key back to the shopkeeper on WhatsApp. It
-                      works only for the device code above.
+                      works only for the device code and Device ID above —
+                      no other phone can use it.
                     </p>
                   </div>
                 )}

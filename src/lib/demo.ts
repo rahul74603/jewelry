@@ -372,6 +372,44 @@ export function demoMutation(
     postings(b, true).movements.forEach((m) => {
       d.products.find((p) => p.id === m.productId)!.stock += m.delta;
     });
+  } else if (action === "deleteDraft") {
+    const draftId = (raw as { id: string }).id;
+    if (!d.drafts.some((x) => x.id === draftId))
+      throw Error("Draft not found.");
+    d.drafts = d.drafts.filter((x) => x.id !== draftId);
+  } else if (action === "deleteInvoice") {
+    // Permanent deletion — no record is kept, unlike void. Stock is
+    // restored exactly as voiding would reverse it; payments and
+    // receivables disappear with the invoice because they are derived
+    // from it. Voided documents and converted estimates stay: the
+    // audit trail needs them.
+    const invoiceId = (raw as { id: string }).id;
+    const b = d.invoices.find((x) => x.id === invoiceId);
+    if (!b) throw Error("Invoice not found.");
+    if (b.voidedAt)
+      throw Error(
+        "A voided document is kept for audit — it cannot be deleted.",
+      );
+    if (b.convertedTo)
+      throw Error(
+        "This estimate was already converted — it cannot be deleted.",
+      );
+    postings(b, true).movements.forEach((m) => {
+      d.products.find((p) => p.id === m.productId)!.stock += m.delta;
+    });
+    // A converted sale bill held its source estimate hostage; free it
+    // so the estimate can be converted again.
+    const src = b.input.sourceEstimate
+      ? d.invoices.find((x) => x.id === b.input.sourceEstimate)
+      : undefined;
+    if (src) delete src.convertedTo;
+    d.invoices = d.invoices.filter((x) => x.id !== invoiceId);
+  } else if (action === "clearWorkspace") {
+    // Start fresh: keep the shop profile (name, bank details, tax
+    // rules…), wipe every product, customer, bill, draft, loan and
+    // rate on this phone. A backup must be made first — the caller
+    // (Settings danger zone) says so before confirming.
+    return emptyWorkspace(d.profile);
   } else if (action === "loan") {
     const l = loanSchema.parse(raw);
     if (d.loans.some((x) => x.id === l.id))

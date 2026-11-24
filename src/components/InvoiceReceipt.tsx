@@ -295,6 +295,21 @@ export function InvoiceReceipt({
               <p>{[shop.mobile, shop.email].filter(Boolean).join(" · ")}</p>
             )}
             {shop.gstRegistered && shop.gstin && <p>GSTIN {shop.gstin}</p>}
+            {(shop.bankName ||
+              shop.accountName ||
+              shop.accountNumber ||
+              shop.ifsc) && (
+              <p>
+                {[
+                  shop.bankName && `Bank: ${shop.bankName}`,
+                  shop.accountName && `A/c holder: ${shop.accountName}`,
+                  shop.accountNumber && `A/c no: ${shop.accountNumber}`,
+                  shop.ifsc && `IFSC: ${shop.ifsc}`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            )}
           </div>
           {b.authorizedMark && !note && (
             <img

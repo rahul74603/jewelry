@@ -6,6 +6,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(DeviceVault.class);
         registerPlugin(DriveFolderPlugin.class);
         registerPlugin(SmsReminderPlugin.class);
+        registerPlugin(BackupSchedulerPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

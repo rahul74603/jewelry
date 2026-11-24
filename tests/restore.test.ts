@@ -103,3 +103,36 @@ describe("real restore", () => {
     );
   });
 });
+
+describe("bank details are optional (old backups)", () => {
+  it("a profile without bank fields still validates and restores", async () => {
+    // A backup made before bank details existed: no bank fields
+    // anywhere — neither on the profile nor on the invoice snapshots.
+    const old = structuredClone(sampleWorkspace()) as Record<string, unknown>;
+    const profile = old.profile as Record<string, unknown>;
+    delete profile.bankName;
+    delete profile.accountName;
+    delete profile.accountNumber;
+    delete profile.ifsc;
+    const file = await createBackup(old as never);
+    expect((await parseBackup(JSON.stringify(file))).valid).toBe(true);
+    const restored = demoMutation(seedDemo(), "restore", file.data);
+    expect(restored.profile.shopName).toBe("Test Jewellers");
+    expect(restored.profile.bankName).toBeUndefined();
+    expect(restored.products).toHaveLength(1);
+  });
+
+  it("a profile with bank details round-trips through backup and restore", async () => {
+    const w = sampleWorkspace();
+    w.profile.bankName = "State Bank";
+    w.profile.accountName = "Test Jewellers";
+    w.profile.accountNumber = "12345678901";
+    w.profile.ifsc = "SBIN0001234";
+    const file = await createBackup(w);
+    expect((await parseBackup(JSON.stringify(file))).valid).toBe(true);
+    const restored = demoMutation(seedDemo(), "restore", file.data);
+    expect(restored.profile.bankName).toBe("State Bank");
+    expect(restored.profile.accountNumber).toBe("12345678901");
+    expect(restored.profile.ifsc).toBe("SBIN0001234");
+  });
+});

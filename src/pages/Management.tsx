@@ -23,6 +23,7 @@ import {
   BellRing,
   BatteryCharging,
   RefreshCw,
+  Copy,
 } from "lucide-react";
 import { useShop, useToast } from "../lib/store";
 import { rupee, cash, err, day } from "../lib/format";
@@ -75,6 +76,17 @@ import {
   type CloudStatus,
 } from "../lib/cloudBackup";
 import {
+  autoBackupFailureText,
+  cancelAutoBackup,
+  isAutoBackupSupported,
+  loadAutoBackupStatus,
+  openAutoBackupAlarmSettings,
+  prepareAutoBackup,
+  runAutoBackupNow,
+  scheduleAutoBackup,
+  type AutoBackupStatus,
+} from "../lib/autoBackup";
+import {
   accountDocuments,
   allocations,
 } from "../../functions/src/core/documents";
@@ -97,6 +109,7 @@ import {
   type SmsSentEntry,
 } from "../lib/autoSms";
 import { InvoiceTable } from "./Dashboard";
+import { getDeviceId } from "../lib/offlineActivation";
 
 /** Build version baked in by CI (VITE_APP_VERSION=1.0.<run number>);
  * "dev" for local builds without the variable. Shown at the bottom of
@@ -371,7 +384,77 @@ function BackupRestoreSection() {
     ),
     [cloudReason, setCloudReason] = useState<string | null>(
       () => getCloudStatus().reason,
-    );
+    ),
+    [autoStatus, setAutoStatus] = useState<AutoBackupStatus | null>(null),
+    [autoBusy, setAutoBusy] = useState(false);
+  const autoSupported = isAutoBackupSupported();
+  const refreshAutoStatus = async () => {
+    if (!autoSupported) return;
+    setAutoStatus(await loadAutoBackupStatus());
+  };
+  // On opening Settings, show the last 02:00 run (if any).
+  useEffect(() => {
+    void refreshAutoStatus();
+  }, []);
+  /**
+   * Automatic 02:00 AM backup toggle (default OFF). Turning it ON
+   * schedules the native 02:00 trigger and hands it a fresh
+   * snapshot; turning it OFF cancels the trigger. The exact-alarm
+   * permission is only ever offered from here — never on app launch.
+   */
+  const toggleAutoBackup = async (next: boolean) => {
+    setError("");
+    if (!autoSupported) return;
+    setAutoBusy(true);
+    try {
+      if (next) {
+        const nextPrefs = { ...prefs, autoBackup: true };
+        setPrefs(nextPrefs);
+        saveBackupPreferences(nextPrefs);
+        const scheduled = await scheduleAutoBackup();
+        await prepareAutoBackup(data);
+        await refreshAutoStatus();
+        notify(
+          scheduled
+            ? scheduled.mode === "exact"
+              ? "Automatic backup ON — roz raat 2 baje backup hoga (phone + Drive)."
+              : "Automatic backup ON — roz raat 2 baje ke aas-paas backup hoga (exact alarm ki permission nahi hai)."
+            : "Automatic backup ON — agali baar app khulne par schedule hoga.",
+        );
+      } else {
+        const nextPrefs = { ...prefs, autoBackup: false };
+        setPrefs(nextPrefs);
+        saveBackupPreferences(nextPrefs);
+        await cancelAutoBackup();
+        await refreshAutoStatus();
+        notify("Automatic backup OFF — ab raat ko backup nahi hoga.");
+      }
+    } catch (e) {
+      setError(err(e));
+    } finally {
+      setAutoBusy(false);
+    }
+  };
+  /** Run the 02:00 worker right now, to prove it works without waiting till night. */
+  const testAutoBackup = async () => {
+    setError("");
+    setAutoBusy(true);
+    try {
+      await prepareAutoBackup(data);
+      const started = await runAutoBackupNow();
+      if (started) {
+        notify(
+          "Automatic backup abhi chal raha hai — thodi der me Refresh se status check karen.",
+        );
+      } else {
+        setError("Automatic backup abhi start nahi hua — dobara try karen.");
+      }
+    } catch (e) {
+      setError(err(e));
+    } finally {
+      setAutoBusy(false);
+    }
+  };
   const refreshCloudState = () => {
     const s = getCloudStatus();
     setCloudFolder(s.folder);
@@ -439,6 +522,8 @@ function BackupRestoreSection() {
       const folder = await pickCloudFolder();
       if (!folder) return; // User cancelled the picker.
       refreshCloudState();
+      // Hand the new folder to the 02:00 worker (if auto-backup is on).
+      void prepareAutoBackup(data);
       notify(
         `Google Drive folder connected — ${folder.name}. Every backup will also be saved there.`,
       );
@@ -461,6 +546,7 @@ function BackupRestoreSection() {
     try {
       await disconnectCloudFolder();
       refreshCloudState();
+      void prepareAutoBackup(data);
       notify("Google Drive folder disconnected. Backups stay on this phone only.");
     } catch (e) {
       setError(err(e));
@@ -536,8 +622,8 @@ function BackupRestoreSection() {
         Documents/{BACKUP_FOLDER} folder on this phone — one file per year
         (aurum-backup-&lt;shop&gt;-&lt;year&gt;.json), overwritten every day,
         so there is always one current file and old years stay separate.
-        Backup runs daily when you open the app — not at a fixed 2am,
-        which needs a native Android scheduler (not built yet). Your shop
+        Backup runs daily when you open the app — or automatically every
+        night at 2:00 AM when the toggle below is ON. Your shop
         details live in “Shop profile” above; the backup includes them.
         No Gmail backup. Connect a Google Drive folder below and the same
         file is also saved there automatically, so your data survives a
@@ -598,6 +684,106 @@ function BackupRestoreSection() {
             </li>
           ))}
         </ul>
+      )}
+      <h3 className="spaced">Automatic backup every night at 2:00 AM</h3>
+      <p className="muted">
+        Roz raat 2 baje backup apne aap hoga — wahi yearly file, phone
+        ke Documents/{BACKUP_FOLDER} folder me, aur Drive folder
+        connected ho to wahan bhi. App khula hona zaroori nahi — phone
+        on hona chahiye.
+      </p>
+      {!autoSupported && (
+        <p className="muted">
+          Automatic backup sirf Android app me kaam karta hai — web
+          build me nahi.
+        </p>
+      )}
+      <label className="check-line full">
+        <input
+          type="checkbox"
+          checked={prefs.autoBackup}
+          disabled={autoBusy || !autoSupported}
+          onChange={(e) => void toggleAutoBackup(e.target.checked)}
+        />
+        Roz raat 2:00 baje automatic backup
+      </label>
+      <p className="muted">
+        2:00 sharp ki guarantee nahi hai — exact alarm mile to 2:00
+        baje hoga, warna raat ke aas-paas (Doze / battery saving ki
+        wajah se shift ho sakta hai). Kuch phones (Infinix, Xiaomi)
+        battery saving me background kaam rok dete hain — app ko
+        battery optimization se bahar rakhen aur autostart allow
+        karen. Agar raat ko phone band ho ya backup fail ho jaye, to
+        agle din raat 2 baje phir try hoga — aur subah app kholte hi
+        sidebar wala reminder bata dega agar aaj ka backup pending
+        hai.
+      </p>
+      {prefs.autoBackup && autoStatus && (
+        <p className="muted">
+          Status:{" "}
+          {autoStatus.mode === "exact"
+            ? "2:00 baje exact alarm se chalega"
+            : autoStatus.mode === "periodic"
+              ? "2:00 ke aas-paas chalega (exact alarm ki permission nahi hai)"
+              : "schedule nahi hua — app dobara kholen"}
+          {autoStatus.lastRunAt ? (
+            <>
+              {" · "}
+              Last automatic backup:{" "}
+              {day(new Date(autoStatus.lastRunAt).getTime())}{" "}
+              {timeOf(autoStatus.lastRunAt)}
+              {autoStatus.lastStatus === "success"
+                ? autoStatus.driveOk
+                  ? " · Phone + Drive"
+                  : " · Phone only (Drive folder not connected)"
+                : autoStatus.lastStatus === "partial"
+                  ? ` · Phone done, Drive failed — ${autoBackupFailureText(autoStatus.lastError)}`
+                  : autoStatus.lastStatus === "failed"
+                    ? ` · Failed — ${autoBackupFailureText(autoStatus.lastError)}`
+                    : " · No backup yet — open the app once"}
+            </>
+          ) : (
+            " · Abhi tak koi automatic backup nahi hua."
+          )}
+        </p>
+      )}
+      {prefs.autoBackup && autoStatus?.mode === "periodic" && (
+        <div className="settings-actions">
+          <span>
+            2:00 sharp ke liye phone ko exact alarm allow karna hoga.
+          </span>
+          <button
+            className="btn outline"
+            disabled={autoBusy}
+            onClick={() => void openAutoBackupAlarmSettings()}
+          >
+            <BellRing size={15} />
+            Alarms &amp; reminders allow karen
+          </button>
+        </div>
+      )}
+      {prefs.autoBackup && (
+        <div className="settings-actions">
+          <span>
+            Test karen — worker abhi backup karke dikhayega, raat ka
+            wait nahi karna.
+          </span>
+          <button
+            className="btn outline"
+            disabled={autoBusy || !autoSupported}
+            onClick={() => void testAutoBackup()}
+          >
+            Test now
+          </button>
+          <button
+            className="btn outline"
+            disabled={autoBusy || !autoSupported}
+            onClick={() => void refreshAutoStatus()}
+          >
+            <RefreshCw size={15} />
+            Refresh
+          </button>
+        </div>
       )}
       <h3 className="spaced">Google Drive cloud backup</h3>
       <p className="muted">
@@ -1007,6 +1193,111 @@ function AutoSmsSection() {
     </section>
   );
 }
+/**
+ * Danger zone (Settings). "Start fresh" wipes every product,
+ * customer, bill, draft, loan and rate on this phone and replaces
+ * the workspace with an empty one — the shop profile (shop name,
+ * bank details, tax rules…) is kept, so the shop does not need to
+ * be set up again. A backup first is strongly advised, and the
+ * confirm step needs an explicit checkbox, not just an OK tap.
+ * The sample data that ships with a fresh install is cleared the
+ * same way; until then the preview keeps its sample workspace.
+ */
+function DangerZoneSection() {
+  const { data, perform } = useShop(),
+    notify = useToast(),
+    [confirming, C] = useState(false),
+    [backedUp, B] = useState(false),
+    [busy, setBusy] = useState(false),
+    [error, E] = useState("");
+  const counts = [
+    data.products.length,
+    data.customers.length,
+    data.invoices.length,
+    data.drafts.length,
+    data.loans.length,
+    data.rates.length,
+  ].reduce((n, x) => n + x, 0);
+  const clear = async () => {
+    setBusy(true);
+    E("");
+    try {
+      await perform("clearWorkspace", {});
+      C(false);
+      B(false);
+      notify("Fresh start — all records cleared. Shop details kept.");
+    } catch (e) {
+      E(err(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="panel settings-panel">
+      <div className="section-kicker">
+        <i />
+        DANGER ZONE
+      </div>
+      <h2>Start fresh — clear all data</h2>
+      <p className="muted">
+        Deletes every product, customer, bill, draft, girvi / EMI
+        record and metal rate on this phone ({counts} records). Your
+        shop details — name, bank details, tax rules — stay as they
+        are. This cannot be undone.
+      </p>
+      <p className="muted">
+        Make a backup first (Backup &amp; restore above) if you may
+        ever need this data back.
+      </p>
+      <div className="settings-actions">
+        <span>
+          {counts === 0
+            ? "Nothing to clear — this workspace is already empty."
+            : "Sample data included — clearing removes it too."}
+        </span>
+        <button
+          className="btn danger"
+          disabled={busy || counts === 0}
+          onClick={() => C(true)}
+        >
+          <Trash2 size={15} />
+          Start fresh — clear all data
+        </button>
+      </div>
+      <Problem message={error} />
+      <Modal
+        open={confirming}
+        onClose={() => C(false)}
+        title="Delete everything on this phone?"
+      >
+        <p className="muted">
+          All {counts} records — products, customers, bills, drafts,
+          girvi / EMI records and metal rates — will be permanently
+          deleted. Only the shop profile stays. A backup made before
+          this can still restore them.
+        </p>
+        <label className="check-line full">
+          <input
+            type="checkbox"
+            checked={backedUp}
+            onChange={(e) => B(e.target.checked)}
+          />
+          I have made a backup (or I do not need this data), and I
+          understand this cannot be undone.
+        </label>
+        <div className="modal-actions">
+          <button
+            className="btn danger"
+            disabled={busy || !backedUp}
+            onClick={() => void clear()}
+          >
+            {busy ? "Clearing…" : "Yes, delete everything"}
+          </button>
+        </div>
+      </Modal>
+    </section>
+  );
+}
 export function Settings() {
   const { data, perform, demo, license } = useShop(),
     notify = useToast(),
@@ -1015,7 +1306,25 @@ export function Settings() {
   const [p, F] = useState<Profile>(() => structuredClone(data.profile)),
     [tab, T] = useState("Shop profile"),
     [busy, B] = useState(false),
-    [error, E] = useState("");
+    [error, E] = useState(""),
+    [deviceId, setDeviceId] = useState(""),
+    [deviceIdCopied, setDeviceIdCopied] = useState(false);
+  // This phone's Device ID (hardware-backed fingerprint) — shown
+  // read-only so the developer can check it later without locking
+  // the app, e.g. to re-issue a key for this phone.
+  useEffect(() => {
+    let alive = true;
+    void getDeviceId()
+      .then((d) => {
+        if (alive) setDeviceId(d);
+      })
+      .catch(() => {
+        // Device ID unavailable: the line simply stays hidden.
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
   const set = <K extends keyof Profile>(k: K, v: Profile[K]) => {
     E("");
     F((p) => ({ ...p, [k]: v }));
@@ -1224,6 +1533,34 @@ export function Settings() {
               />
               Round grand total to nearest rupee
             </label>
+            <h3 className="spaced">Bank details (printed on bills)</h3>
+            <p className="muted">
+              Optional — filled fields appear under the GSTIN on every
+              bill, so customers can pay by bank transfer. Leave blank
+              to hide them.
+            </p>
+            {(
+              [
+                ["bankName", "Bank name"],
+                ["accountName", "Account holder name"],
+                ["accountNumber", "Account number"],
+                ["ifsc", "IFSC code"],
+              ] as const
+            ).map(([k, l]) => (
+              <Field key={k} label={l}>
+                <input
+                  value={p[k] ?? ""}
+                  onChange={(e) =>
+                    set(
+                      k,
+                      k === "ifsc"
+                        ? e.target.value.toUpperCase()
+                        : e.target.value,
+                    )
+                  }
+                />
+              </Field>
+            ))}
             <div className="info-box full">
               <ReceiptText />
               <p>
@@ -1354,6 +1691,27 @@ export function Settings() {
       </form>
       <BackupRestoreSection />
       <AutoSmsSection />
+      <DangerZoneSection />
+      {deviceId && (
+        <p className="muted">
+          Device ID <code>{deviceId}</code>{" "}
+          <button
+            className="btn outline"
+            onClick={() =>
+              navigator.clipboard
+                .writeText(deviceId)
+                .then(() => {
+                  setDeviceIdCopied(true);
+                  notify("Device ID copied.");
+                })
+                .catch((e) => E(err(e)))
+            }
+          >
+            <Copy size={14} />
+            {deviceIdCopied ? "Copied!" : "Copy Device ID"}
+          </button>
+        </p>
+      )}
       <p className="muted">App version {APP_VERSION}</p>
     </>
   );

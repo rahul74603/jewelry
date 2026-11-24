@@ -34,6 +34,13 @@ export const profileSchema = z
     email,
     address: z.string().max(400),
     gstin,
+    // Bank details for payment by transfer — optional, printed on
+    // bills only when filled. Optional (not defaulted) so backups
+    // made before these fields existed still validate and restore.
+    bankName: z.string().trim().max(100).optional(),
+    accountName: z.string().trim().max(100).optional(),
+    accountNumber: z.string().trim().max(40).optional(),
+    ifsc: z.string().trim().max(20).optional(),
     logo: z
       .string()
       .max(150000)
@@ -77,6 +84,10 @@ export const makeProfile = (
   mobile: "",
   address: "",
   gstin: "",
+  bankName: "",
+  accountName: "",
+  accountNumber: "",
+  ifsc: "",
   logo: "",
   prefix: "INV",
   gstRegistered: false,
@@ -416,6 +427,9 @@ export type Action =
   | "invoice"
   | "draft"
   | "void"
+  | "deleteDraft"
+  | "deleteInvoice"
+  | "clearWorkspace"
   | "adjust"
   | "loan"
   | "loanPayment"
