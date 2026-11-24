@@ -131,7 +131,7 @@ describe("license heartbeat: blocked flag", () => {
   });
 });
 
-describe("license heartbeat: once-a-day throttle", () => {
+describe("license heartbeat: 5-minute throttle", () => {
   beforeEach(() => {
     state.serverConfigured = true;
     state.adminConfigured = true;
@@ -141,7 +141,7 @@ describe("license heartbeat: once-a-day throttle", () => {
     heartbeatFn.mockClear();
   });
 
-  it("skips the call when a check ran within the last day", async () => {
+  it("skips the call when a check ran within the last 5 minutes", async () => {
     localStorage.setItem(LICENSE_CHECK_AT_KEY, String(Date.now()));
     expect(shouldCheckLicense()).toBe(false);
     const r = await maybeCheckLicenseHeartbeat(args);
@@ -149,7 +149,7 @@ describe("license heartbeat: once-a-day throttle", () => {
     expect(heartbeatFn).not.toHaveBeenCalled();
   });
 
-  it("calls again after 24 hours have passed", async () => {
+  it("calls again after 5 minutes have passed", async () => {
     localStorage.setItem(
       LICENSE_CHECK_AT_KEY,
       String(Date.now() - LICENSE_CHECK_INTERVAL_MS - 1000),

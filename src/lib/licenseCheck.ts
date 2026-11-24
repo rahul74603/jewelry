@@ -8,10 +8,16 @@ import { heartbeat, isLicenseServerConfigured } from "./licenseServer";
  * Offline-license heartbeat (kill switch + presence).
  *
  * SCOPE (Ajay, 2026-11-24 19:02 IST): online ONLY for block/unlock
- * + presence. This file sends exactly four fields, at most once a
- * day (plus on startup/foreground when online): deviceId, shopName,
+ * + presence. This file sends exactly four fields, on every app
+ * open / foreground (throttled to once every 5 minutes so rapid
+ * restarts do not spam the server): deviceId, shopName,
  * model, appVersion. Nothing else goes online — no billing, no data
  * sync, no server workspace.
+ *
+ * The 5-minute check (not once-a-day) is deliberate: a block from
+ * the Master app must lock the Customer app on its NEXT open, not
+ * up to a day later. The server rate-limits to 10 heartbeats/hour
+ * per device, so a 5-minute throttle stays safely under it.
  *
  * The server is the Cloudflare Workers license server (see
  * src/lib/licenseServer.ts). When it is not configured (no
@@ -24,7 +30,9 @@ import { heartbeat, isLicenseServerConfigured } from "./licenseServer";
 
 export const LICENSE_BLOCKED_KEY = "aurum:license-blocked";
 export const LICENSE_CHECK_AT_KEY = "aurum:license-check-at";
-export const LICENSE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+// Check on every app open, throttled to once every 5 minutes — a
+// block must lock the app on its next open, not a day later.
+export const LICENSE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
 export type HeartbeatResult = {
   status: OfflineLicenseStatus;
@@ -52,7 +60,7 @@ export function setLicenseBlocked(blocked: boolean): void {
   else s.removeItem(LICENSE_BLOCKED_KEY);
 }
 
-/** True when a day has passed since the last heartbeat attempt. */
+/** True when the check interval has passed since the last heartbeat attempt. */
 export function shouldCheckLicense(now = Date.now()): boolean {
   const at = Number(storage()?.getItem(LICENSE_CHECK_AT_KEY) ?? 0);
   return !Number.isFinite(at) || at <= 0 || now - at >= LICENSE_CHECK_INTERVAL_MS;
@@ -111,8 +119,9 @@ export async function checkLicenseHeartbeat(
 }
 
 /**
- * Heartbeat with the once-a-day throttle: skips the call when a
- * check already ran in the last 24 hours.
+ * Heartbeat with a short throttle: skips the call when a check
+ * already ran in the last 5 minutes, so rapid restarts do not spam
+ * the server. A block therefore applies on the next app open.
  */
 export async function maybeCheckLicenseHeartbeat(
   args: HeartbeatArgs,
