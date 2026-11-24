@@ -28,27 +28,55 @@ export function callable(fn: (r: CallableRequest) => Promise<unknown>) {
       try {
         return await fn(r);
       } catch (e) {
-        if (e instanceof HttpsError) throw e;
-        if (e instanceof z.ZodError)
-          throw new HttpsError(
-            "invalid-argument",
-            e.issues
-              .map((x) => `${x.path.join(".")}: ${x.message}`)
-              .join("; ")
-              .slice(0, 400),
-          );
-        // Do not leak provider errors, database keys or user records.
-        if (e instanceof Error && e.constructor === Error && !("code" in e))
-          throw new HttpsError("failed-precondition", e.message);
-        console.error("Trusted operation failed", {
-          code: (e as { code?: unknown })?.code ?? "internal",
-        });
-        throw new HttpsError(
-          "internal",
-          "Operation unavailable. No partial financial posting was saved.",
-        );
+        return mapCallableError(e);
       }
     },
+  );
+}
+/**
+ * Unauthenticated callable: same App Check enforcement and error
+ * mapping as `callable()`, but NO sign-in requirement. For the
+ * offline-license heartbeat only — the offline activation has no
+ * login, so the device cannot authenticate. Rate limiting and strict
+ * zod validation inside the handler are what keep it abuse-resistant;
+ * it never returns another device's data.
+ */
+export function publicCallable(fn: (r: CallableRequest) => Promise<unknown>) {
+  return onCall(
+    {
+      region: "asia-south1",
+      enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== "true",
+      maxInstances: 20,
+      timeoutSeconds: 60,
+    },
+    async (r) => {
+      try {
+        return await fn(r);
+      } catch (e) {
+        return mapCallableError(e);
+      }
+    },
+  );
+}
+function mapCallableError(e: unknown): never {
+  if (e instanceof HttpsError) throw e;
+  if (e instanceof z.ZodError)
+    throw new HttpsError(
+      "invalid-argument",
+      e.issues
+        .map((x) => `${x.path.join(".")}: ${x.message}`)
+        .join("; ")
+        .slice(0, 400),
+    );
+  // Do not leak provider errors, database keys or user records.
+  if (e instanceof Error && e.constructor === Error && !("code" in e))
+    throw new HttpsError("failed-precondition", e.message);
+  console.error("Trusted operation failed", {
+    code: (e as { code?: unknown })?.code ?? "internal",
+  });
+  throw new HttpsError(
+    "internal",
+    "Operation unavailable. No partial financial posting was saved.",
   );
 }
 export function owner(r: CallableRequest) {

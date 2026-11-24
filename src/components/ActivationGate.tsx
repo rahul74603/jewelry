@@ -10,6 +10,7 @@ import {
   MASTER_SECRET_PLACEHOLDER,
   DEVELOPER_WHATSAPP,
 } from "../lib/offlineActivation";
+import { getDeviceModel } from "../lib/device";
 import { err } from "../lib/format";
 import { useToast } from "../lib/store";
 import { Brand, Field, Problem } from "./ui";
@@ -45,6 +46,7 @@ export default function ActivationGate({
   const notify = useToast();
   const [code, setCode] = useState(""),
     [deviceId, setDeviceId] = useState(""),
+    [model, setModel] = useState(""),
     [key, setKey] = useState(""),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
@@ -55,11 +57,15 @@ export default function ActivationGate({
         codeForInstallId(id, MASTER_SECRET_PLACEHOLDER),
       ),
       getDeviceId(),
+      // Model is a signal only (per-model, not per-phone) — a missing
+      // model never blocks the lock screen.
+      getDeviceModel(),
     ])
-      .then(([c, d]) => {
+      .then(([c, d, m]) => {
         if (alive) {
           setCode(c);
           setDeviceId(d);
+          setModel(m);
         }
       })
       .catch((e) => {
@@ -92,11 +98,17 @@ export default function ActivationGate({
             <div className="code-box">
               {deviceId || "Loading Device ID…"}
             </div>
+            {model && (
+              <>
+                <p className="code-label">Phone model</p>
+                <div className="code-box">{model}</div>
+              </>
+            )}
             <a
               className="btn outline"
               href={
                 code && deviceId
-                  ? developerWhatsAppLink(code, deviceId)
+                  ? developerWhatsAppLink(code, deviceId, model || undefined)
                   : undefined
               }
               target="_blank"

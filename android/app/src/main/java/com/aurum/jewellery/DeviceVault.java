@@ -27,6 +27,15 @@ public class DeviceVault extends Plugin {
             call.resolve(out);
         } catch (Exception e) { call.reject("Android Keystore unavailable"); }
     }
+    @PluginMethod public void model(PluginCall call) {
+        JSObject out = new JSObject();
+        // Per-model name only (e.g. "Infinix ZERO 5G 2023") — NOT
+        // per-phone. It is a signal for the issued-keys register, never
+        // part of the unlock-key math, which stays bound to code +
+        // Device ID.
+        out.put("model", Build.MODEL == null ? "" : Build.MODEL);
+        call.resolve(out);
+    }
     @PluginMethod public void sign(PluginCall call) {
         try {
             byte[] signature = DeviceKeys.sign(call.getString("slot", ""), call.getString("message", ""));

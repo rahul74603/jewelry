@@ -4,6 +4,10 @@ import { Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
 import { id, makeProfile } from "../core/model";
 import { type License, type Device } from "../core/license";
+import {
+  parseStatusChange,
+  type OfflineLicenseDoc,
+} from "../core/offlineLicense";
 import { db, callable, requireAdmin, sha, audit } from "./common";
 const planSchema = z.object({
   id,
@@ -50,6 +54,40 @@ export const companyConsole = callable(async (r) => {
       plans: plans.docs.map((d) => d.data()),
       events: events.docs.map((d) => d.data()),
     };
+  }
+  if (op === "offlineLicenses") {
+    // Kill-switch dashboard: every offline-activated device that has
+    // ever phoned home, newest heartbeat first. Presence only —
+    // Device ID, shop name, model, app version, last seen, status.
+    const snap = await db
+      .collection("offlineLicenses")
+      .orderBy("lastSeen", "desc")
+      .limit(500)
+      .get();
+    return {
+      devices: snap.docs.map((d) => d.data() as OfflineLicenseDoc),
+    };
+  }
+  if (op === "offlineLicenseStatus") {
+    // Kill switch: block or unblock one offline device by Device ID.
+    const v = parseStatusChange(data);
+    await db.runTransaction(async (tx) => {
+      const ref = db.doc(`offlineLicenses/${v.deviceId}`);
+      const cur = (await tx.get(ref)).data() as
+        | OfflineLicenseDoc
+        | undefined;
+      if (!cur) throw Error("Device not found.");
+      tx.update(ref, { status: v.status });
+      audit(
+        tx,
+        uid,
+        v.status === "blocked"
+          ? "Offline device blocked"
+          : "Offline device unblocked",
+        { deviceId: v.deviceId },
+      );
+    });
+    return { ok: true };
   }
   if (op === "plan") {
     const p = planSchema.parse(data);

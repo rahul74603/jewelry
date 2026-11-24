@@ -297,9 +297,13 @@ export function clearOfflineLicense(): void {
 export function developerWhatsAppLink(
   deviceCode: string,
   deviceId?: string,
+  model?: string,
 ): string {
-  const text = deviceId
-    ? `Namaste, Aurum activation code: ${deviceCode}. Device ID: ${deviceId}. Please send the unlock key.`
-    : `Namaste, Aurum activation code: ${deviceCode}. Please send the unlock key.`;
-  return `https://wa.me/${DEVELOPER_WHATSAPP}?text=${encodeURIComponent(text)}`;
+  const parts = [`Namaste, Aurum activation code: ${deviceCode}.`];
+  if (deviceId) parts.push(`Device ID: ${deviceId}.`);
+  // Phone model is a signal only (per-model, not per-phone) — it is
+  // never part of the key math. Appended only when known.
+  if (model?.trim()) parts.push(`Phone model: ${model.trim()}.`);
+  parts.push("Please send the unlock key.");
+  return `https://wa.me/${DEVELOPER_WHATSAPP}?text=${encodeURIComponent(parts.join(" "))}`;
 }

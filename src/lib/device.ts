@@ -19,6 +19,7 @@ const vault = registerPlugin<{
     },
   ) => Promise<{ saved: boolean }>;
   shareText: (v: { text: string }) => Promise<void>;
+  model: () => Promise<{ model: string }>;
 }>("DeviceVault");
 const b64 = (b: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Array(b)));
 export const hash = async (b: BufferSource) =>
@@ -97,6 +98,51 @@ export async function printDocument(
   );
   if (native) await vault.printInvoice({ format, documentNumber });
   else window.print();
+}
+
+/**
+ * Best-effort phone model name from a browser user agent, e.g.
+ * "Infinix X6815D" from "... (Linux; Android 13; Infinix X6815D) ...".
+ * Returns "" when no model can be read — desktop UAs have none, and
+ * that is fine. Never throws. The model is per-model, NOT per-phone,
+ * so it is only a signal for the issued-keys register, never part of
+ * the unlock-key math.
+ */
+export function parseDeviceModelFromUserAgent(userAgent: string): string {
+  try {
+    if (!userAgent) return "";
+    const android = userAgent.match(/\bAndroid\s+[^;]*;\s*([^;)]+)/i);
+    if (android) {
+      const model = android[1].trim();
+      if (model && !/^(mobile|tablet)$/i.test(model)) return model;
+      return "";
+    }
+    if (/\biPhone\b/i.test(userAgent)) return "iPhone";
+    if (/\biPad\b/i.test(userAgent)) return "iPad";
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * This phone's model name. On Android it comes from the native
+ * DeviceVault plugin (android.os.Build.MODEL); on the web it falls
+ * back to parsing navigator.userAgent, which may return "". Never
+ * throws — a missing model must never block the lock screen.
+ */
+export async function getDeviceModel(): Promise<string> {
+  try {
+    if (native) {
+      const out = await vault.model();
+      return typeof out?.model === "string" ? out.model.trim() : "";
+    }
+    if (typeof navigator !== "undefined")
+      return parseDeviceModelFromUserAgent(navigator.userAgent || "");
+    return "";
+  } catch {
+    return "";
+  }
 }
 
 export async function shareSummary(title: string, text: string) {

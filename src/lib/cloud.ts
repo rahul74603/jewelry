@@ -19,7 +19,7 @@ initializeAppCheck(app, {
   isTokenAutoRefreshEnabled: true,
 });
 export const auth = initializeAuth(app, { persistence: inMemoryPersistence });
-const api = getFunctions(app, "asia-south1");
+export const api = getFunctions(app, "asia-south1");
 export async function secured<T>(action: Action, payload: unknown): Promise<T> {
   const uid = auth.currentUser?.uid;
   if (!uid) throw Error("Sign in first.");
