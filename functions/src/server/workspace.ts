@@ -364,6 +364,136 @@ export async function shopAction(
     log(input ? "Document finalized" : "Document reversed", key);
     return { id: key, number: b.number };
   }
+  if (action === "deleteDraft") {
+    const { id: key } = z.object({ id }).parse(raw);
+    const ref = record("drafts", key);
+    if (!(await tx.get(ref)).exists) throw Error("Draft not found.");
+    tx.delete(ref);
+    log("Draft deleted", key);
+    return { ok: true };
+  }
+  if (action === "deleteInvoice") {
+    // Permanent deletion — no record is kept, unlike void. Stock,
+    // payments and receivables are reversed exactly like a void
+    // (negating entries keep the ledger sums right), then the invoice
+    // document itself is dropped. Voided documents and converted
+    // estimates stay: the audit trail needs them.
+    const { id: key } = z.object({ id }).parse(raw);
+    const ref = record("invoices", key),
+      snap = await tx.get(ref);
+    if (!snap.exists) throw Error("Invoice not found.");
+    const b = snap.data() as Invoice;
+    if ((await tx.get(record("reversals", key))).exists)
+      throw Error(
+        "A voided document is kept for audit — it cannot be deleted.",
+      );
+    if ((await tx.get(record("conversions", key))).exists)
+      throw Error(
+        "This estimate was already converted — it cannot be deleted.",
+      );
+    const products = (
+      await Promise.all(
+        b.lines.map((i) => tx.get(record("products", i.productId))),
+      )
+    ).map((d) => d.data() as Product);
+    const entry = postings(b, true),
+      prefix = `delete_${key}`;
+    entry.movements.forEach((m, i) => {
+      const p = products.find((x) => x.id === m.productId)!;
+      tx.update(record("products", p.id), { stock: p.stock + m.delta });
+      tx.create(record("stockMovements", `${prefix}_${i}`), {
+        ...m,
+        at,
+        invoiceId: key,
+      });
+    });
+    if (entry.received)
+      tx.create(record("payments", prefix), {
+        at,
+        invoiceId: key,
+        amountPaise: entry.received,
+        ...(b.mode === "Split"
+          ? {
+              allocations: allocations(b.input).map((p) => ({
+                ...p,
+                amountPaise: p.amountPaise * -1,
+              })),
+            }
+          : {}),
+        mode: b.mode,
+        customerId: b.customer?.id ?? "",
+      });
+    if (b.customer && b.type !== "Estimate")
+      tx.create(record("customerLedger", prefix), {
+        at,
+        invoiceId: key,
+        customerId: b.customer.id,
+        deltaPaise: entry.receivable,
+      });
+    // A converted sale bill held its source estimate hostage; free it.
+    if (b.input.sourceEstimate)
+      tx.delete(record("conversions", b.input.sourceEstimate));
+    tx.delete(ref);
+    log("Document permanently deleted", key);
+    return { id: key, number: b.number };
+  }
+  if (action === "clearWorkspace") {
+    // Start fresh: keep the shop profile, wipe every record — the 7
+    // workspace collections, reversals/conversions, and the derived
+    // payment/ledger/movement history too, so a new bill for an old
+    // customer does not inherit a stale balance. Same write-count
+    // guard as a restore.
+    const buckets = [
+      "products",
+      "metalRates",
+      "customers",
+      "invoices",
+      "drafts",
+      "loans",
+    ];
+    const [oldRefs, oldReversals, oldConversions, oldDerived] =
+      await Promise.all([
+        Promise.all(buckets.map((name) => refs(tx, t, name))).then((rs) =>
+          rs.flat(),
+        ),
+        refs(tx, t, "reversals"),
+        refs(tx, t, "conversions"),
+        Promise.all(
+          ["payments", "customerLedger", "stockMovements"].map((name) =>
+            refs(tx, t, name),
+          ),
+        ).then((rs) => rs.flat()),
+      ]);
+    const writes =
+      oldRefs.length +
+      oldReversals.length +
+      oldConversions.length +
+      oldDerived.length +
+      1;
+    if (writes > 450)
+      throw Error(
+        "Workspace is too large to clear in one go — contact support for a paginated clear.",
+      );
+    for (const ref of [
+      ...oldRefs,
+      ...oldReversals,
+      ...oldConversions,
+      ...oldDerived,
+    ])
+      tx.delete(ref);
+    log("Workspace cleared — start fresh", "clear");
+    return {
+      ok: true,
+      counts: {
+        products: 0,
+        customers: 0,
+        rates: 0,
+        invoices: 0,
+        drafts: 0,
+        loans: 0,
+      },
+    };
+  }
   if (action === "loan") {
     const l = loanSchema.parse(raw);
     tx.create(record("loans", l.id), l);

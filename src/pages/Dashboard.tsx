@@ -21,7 +21,6 @@ import {
   Layers3,
   Sparkles,
   SlidersHorizontal,
-  Clock3,
   Package,
   ChevronRight,
   Coins,
@@ -36,17 +35,8 @@ import {
   paymentStatus,
 } from "../../functions/src/core/billing";
 import { Avatar, Empty, Ingots, Select, Status, Icon } from "../components/ui";
-import {
-  loadLastBackupAt,
-  loadBackupPreferences,
-  runDailyCheck,
-} from "../lib/backup";
 import { prepareAutoSms } from "../lib/autoSms";
-import {
-  dueLoans,
-  loanState,
-  loanSummary,
-} from "../../functions/src/core/loans";
+import { prepareAutoBackup } from "../lib/autoBackup";
 import type { Invoice, Workspace } from "../../functions/src/core/model";
 export function SalesChart({ data }: { data: Workspace }) {
   const [length, N] = useState(7),
@@ -280,22 +270,7 @@ export function InvoiceTable({ rows }: { rows: Invoice[] }) {
 }
 export default function Dashboard() {
   const { data } = useShop(),
-    [period, P] = useState(1),
-    [backupDue, setBackupDue] = useState(false);
-  // Daily-on-open backup check (MediSmart behaviour): remind once a day
-  // when no backup was made today. Not an exact 02:00 run — that needs
-  // a native Android WorkManager scheduler, which is not built yet.
-  useEffect(() => {
-    try {
-      if (
-        loadBackupPreferences().autoReminder &&
-        runDailyCheck(loadLastBackupAt())
-      )
-        setBackupDue(true);
-    } catch {
-      // Reminder is best-effort; a storage failure must not break Dashboard.
-    }
-  }, []);
+    [period, P] = useState(1);
   const hi = data.profile.language === "hi";
   // Automatic daily SMS reminders (10:00 AM): hand today's due list
   // to the native scheduler on every app open, so the payload stays
@@ -303,19 +278,16 @@ export default function Dashboard() {
   // refreshes the payload, so a paid record is never messaged twice.
   // Best-effort: prepareAutoSms never throws and never asks for any
   // permission (the SMS permission is only asked from the Settings
-  // toggle). The in-app due list below is the fallback.
+  // toggle). The due list itself lives on the Girvi & EMI page, and
+  // the backup / due alerts live in the sidebar (More menu) — the
+  // dashboard top stays clean.
+  // Same effect also refreshes the 02:00 AM backup snapshot
+  // (prepareAutoBackup): the native worker can only copy the
+  // snapshot the JS side wrote, so it must stay fresh.
   useEffect(() => {
     void prepareAutoSms(data);
+    void prepareAutoBackup(data);
   }, [data]);
-  // Daily-on-open girvi / EMI check (same pattern as the backup
-  // reminder above): every morning the shopkeeper sees which records
-  // are due today or overdue, with the balance still owed. When
-  // automatic SMS is ON in Settings, the same list is also handed to
-  // the native scheduler above, which sends it by SMS at 10:00 AM —
-  // the reminder list here and on the Girvi & EMI page is the fallback.
-  const due = useMemo(() => dueLoans(data.loans ?? []), [data.loans]),
-    dueBalance = due.reduce((n, l) => n + loanSummary(l).balancePaise, 0),
-    overdueCount = due.filter((l) => loanState(l) === "overdue").length;
   const rows = series(data, period),
     sales = rows.reduce((s, r) => s + r.sales, 0),
     paid = rows.reduce((s, r) => s + r.paid, 0),
@@ -390,36 +362,6 @@ export default function Dashboard() {
   ];
   return (
     <div className="dashboard">
-      {backupDue && (
-        <section className="panel">
-          <div className="info-box">
-            <Clock3 size={20} />
-            <p>
-              Today’s backup hasn’t been made yet.{" "}
-              <Link to="/settings">Back up now in Settings</Link> — one tap
-              saves it to the AurumBackup folder on this phone and to your
-              connected Google Drive folder, so your data survives a lost
-              phone. Connect a Drive folder once in Settings → Backup
-              &amp; restore.
-            </p>
-          </div>
-        </section>
-      )}
-      {due.length > 0 && (
-        <section className="panel">
-          <div className="info-box">
-            <Hourglass size={20} />
-            <p>
-              {due.length} girvi / EMI record{due.length > 1 ? "s are" : " is"}{" "}
-              due today or overdue
-              {overdueCount > 0 ? ` (${overdueCount} overdue)` : ""} —{" "}
-              {rupee(dueBalance, 2)} balance due.{" "}
-              <Link to="/loans">Open Girvi &amp; EMI</Link> to send the
-              WhatsApp reminder.
-            </p>
-          </div>
-        </section>
-      )}
       <section className="hero">
         <div className="hero-photo" />
         <div className="hero-weave" />

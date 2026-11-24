@@ -59,6 +59,25 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+
+        <!-- Automatic daily backup (02:00 AM): same pattern as the
+             10:00 AM SMS reminders — the exact-alarm receiver re-arms
+             tomorrow's alarm, the boot receiver re-arms it after a
+             reboot (exact alarms do not survive one). -->
+        <receiver
+            android:name=".BackupAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.aurum.jewellery.AUTO_BACKUP_ALARM" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name=".BackupBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 
     <!-- Permissions -->

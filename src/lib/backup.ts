@@ -15,9 +15,14 @@
  * OAuth). The local copy is always kept; a failed cloud upload only
  * marks the cloud copy pending and retries with the next backup.
  *
- * Backup runs daily-on-open (like MediSmart), NOT at an exact 02:00 —
- * an exact 02:00 backup needs a native Android WorkManager scheduler
- * plus a battery-optimisation exemption, which is not built yet.
+ * Backup runs daily when you open the app (like MediSmart) — and,
+ * optionally, automatically every night at 02:00 via the native
+ * scheduler (see src/lib/autoBackup.ts): the TS side hands a fresh
+ * snapshot to the native worker, which writes the same yearly file
+ * to Documents/AurumBackup and to the connected Drive folder.
+ * 02:00 sharp is not guaranteed (Doze / battery saving can shift
+ * it, like the 10:00 AM SMS) — the Settings screen says "around
+ * 2 AM".
  *
  * Restore is real: pick a file → validateBackup() (format, version,
  * SHA-256 checksum, counts) → confirm → perform("restore", data)
@@ -48,12 +53,15 @@ export type BackupDestination = "download" | "share";
 export type BackupPreferences = {
   /** Daily reminder on app start when no backup was made today. */
   autoReminder: boolean;
+  /** Automatic backup every night at 02:00 (native scheduler). */
+  autoBackup: boolean;
   /** Where the shopkeeper prefers to send the backup file. */
   destination: BackupDestination;
 };
 
 export const DEFAULT_BACKUP_PREFERENCES: BackupPreferences = {
   autoReminder: true,
+  autoBackup: false,
   destination: "download",
 };
 
@@ -245,38 +253,75 @@ export function recordBackupHistory(
   return merged.slice(0, MAX_BACKUP_HISTORY);
 }
 
-function readJson<T>(key: string): T | null {
+/** Minimal key/value store for backup state (localStorage by
+ * default; tests pass a memory store). Structural — the CloudStore
+ * in cloudBackup.ts satisfies it. */
+export type PrefsStore = {
+  get(key: string): string | null;
+  set(key: string, value: string): void;
+};
+
+const localPrefsStore: PrefsStore = {
+  get: (key) => {
+    try {
+      return typeof localStorage === "undefined"
+        ? null
+        : localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  set: (key, value) => {
+    try {
+      if (typeof localStorage !== "undefined")
+        localStorage.setItem(key, value);
+    } catch {
+      // Storage full / unavailable: backup still works via
+      // download/share; only the reminder history is lost.
+    }
+  },
+};
+
+function readJson<T>(key: string, store: PrefsStore = localPrefsStore): T | null {
   try {
-    if (typeof localStorage === "undefined") return null;
-    const raw = localStorage.getItem(key);
+    const raw = store.get(key);
     return raw ? (JSON.parse(raw) as T) : null;
   } catch {
     return null;
   }
 }
 
-function writeJson(key: string, value: unknown): void {
+function writeJson(
+  key: string,
+  value: unknown,
+  store: PrefsStore = localPrefsStore,
+): void {
   try {
-    if (typeof localStorage === "undefined") return;
-    localStorage.setItem(key, JSON.stringify(value));
+    store.set(key, JSON.stringify(value));
   } catch {
     // Storage full / unavailable (private mode): backup still works
     // via download/share; only the reminder history is lost.
   }
 }
 
-export function loadLastBackupAt(): string | null {
-  return readJson<string>(LAST_BACKUP_KEY);
+export function loadLastBackupAt(
+  store: PrefsStore = localPrefsStore,
+): string | null {
+  return readJson<string>(LAST_BACKUP_KEY, store);
 }
 
-export function loadBackupHistory(): BackupHistoryEntry[] {
-  return readJson<BackupHistoryEntry[]>(HISTORY_KEY) ?? [];
+export function loadBackupHistory(
+  store: PrefsStore = localPrefsStore,
+): BackupHistoryEntry[] {
+  return readJson<BackupHistoryEntry[]>(HISTORY_KEY, store) ?? [];
 }
 
-export function loadBackupPreferences(): BackupPreferences {
+export function loadBackupPreferences(
+  store: PrefsStore = localPrefsStore,
+): BackupPreferences {
   const prefs = {
     ...DEFAULT_BACKUP_PREFERENCES,
-    ...readJson<Partial<BackupPreferences>>(PREFS_KEY),
+    ...readJson<Partial<BackupPreferences>>(PREFS_KEY, store),
   };
   // Migrate old destination values (gmail / whatsapp / drive) — Gmail
   // backup was removed; WhatsApp/Drive are manual picks on the Share
@@ -286,21 +331,58 @@ export function loadBackupPreferences(): BackupPreferences {
   return prefs;
 }
 
-export function saveBackupPreferences(prefs: BackupPreferences): void {
-  writeJson(PREFS_KEY, prefs);
+export function saveBackupPreferences(
+  prefs: BackupPreferences,
+  store: PrefsStore = localPrefsStore,
+): void {
+  store.set(PREFS_KEY, JSON.stringify(prefs));
+}
+
+/** A backup run the native 02:00 worker made (plain data — the
+ * worker cannot write WebView localStorage itself, so the TS side
+ * records it on the next app open). */
+export type AutoBackupRun = {
+  createdAt: string;
+  filename: string;
+  shopName: string;
+  counts: BackupCounts;
+};
+
+/** Record a backup run (manual or automatic): same last-backup
+ * timestamp + history entry, so the Dashboard reminder clears.
+ * Only moves forward — an older run never overwrites a newer
+ * manual backup. */
+export function recordBackupRun(
+  run: AutoBackupRun,
+  store: PrefsStore = localPrefsStore,
+): BackupHistoryEntry[] {
+  const last = loadLastBackupAt(store);
+  if (last && last >= run.createdAt) return loadBackupHistory(store);
+  writeJson(LAST_BACKUP_KEY, run.createdAt, store);
+  const history = recordBackupHistory(loadBackupHistory(store), {
+    createdAt: run.createdAt,
+    filename: run.filename,
+    shopName: run.shopName,
+    counts: run.counts,
+  });
+  writeJson(HISTORY_KEY, history, store);
+  return history;
 }
 
 /** Record a completed backup (updates last-backup date + per-year history). */
-export function markBackupDone(file: BackupFile): BackupHistoryEntry[] {
-  writeJson(LAST_BACKUP_KEY, file.createdAt);
-  const history = recordBackupHistory(loadBackupHistory(), {
-    createdAt: file.createdAt,
-    filename: backupFilename(file.shopName, new Date(file.createdAt)),
-    shopName: file.shopName,
-    counts: file.counts,
-  });
-  writeJson(HISTORY_KEY, history);
-  return history;
+export function markBackupDone(
+  file: BackupFile,
+  store: PrefsStore = localPrefsStore,
+): BackupHistoryEntry[] {
+  return recordBackupRun(
+    {
+      createdAt: file.createdAt,
+      filename: backupFilename(file.shopName, new Date(file.createdAt)),
+      shopName: file.shopName,
+      counts: file.counts,
+    },
+    store,
+  );
 }
 
 export type BackupSaveResult = {

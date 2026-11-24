@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Link,
   NavLink,
@@ -36,10 +36,22 @@ import {
   Mail,
   CalendarDays,
   HandCoins,
+  Clock3,
+  Hourglass,
 } from "lucide-react";
 import { Brand, Icon, Modal, Avatar, Empty } from "./ui";
 import { useShop } from "../lib/store";
-import { day, initials } from "../lib/format";
+import { day, initials, rupee } from "../lib/format";
+import {
+  loadLastBackupAt,
+  loadBackupPreferences,
+  runDailyCheck,
+} from "../lib/backup";
+import {
+  dueLoans,
+  loanState,
+  loanSummary,
+} from "../../functions/src/core/loans";
 import Dashboard from "../pages/Dashboard";
 import { Invoices, InvoiceEditor, InvoiceDetail } from "../pages/Billing";
 import { Inventory, Customers, MetalRates } from "../pages/Catalog";
@@ -105,6 +117,25 @@ export function Shell() {
     links.find((l) => l.path !== "/" && loc.pathname.startsWith(l.path)) ??
     links[0];
   const low = data.products.filter((p) => p.stock < 5);
+  // Alerts & reminders (moved here from the top of the Dashboard, Nov
+  // 2026 — the dashboard top stays clean; the alerts live on the
+  // side instead). Recomputed on every navigation, so backing up in
+  // Settings and coming back clears the backup alert without a reload.
+  const [backupDue, setBackupDue] = useState(false);
+  useEffect(() => {
+    try {
+      setBackupDue(
+        loadBackupPreferences().autoReminder &&
+          runDailyCheck(loadLastBackupAt()),
+      );
+    } catch {
+      // Reminder is best-effort; a storage failure must not break the shell.
+      setBackupDue(false);
+    }
+  }, [loc.pathname]);
+  const due = useMemo(() => dueLoans(data.loans ?? []), [data.loans]),
+    dueBalance = due.reduce((n, l) => n + loanSummary(l).balancePaise, 0),
+    overdueCount = due.filter((l) => loanState(l) === "overdue").length;
   const goto = (path: string) => {
     V("");
     M(false);
@@ -186,6 +217,36 @@ export function Shell() {
           <h2>MANAGEMENT</h2>
           {links.slice(4).map(navItem)}
         </div>
+        {(backupDue || due.length > 0) && (
+          <div className="nav-group">
+            <h2>ALERTS &amp; REMINDERS</h2>
+            {backupDue && (
+              <button
+                className="nav-item alert-item"
+                onClick={() => goto("/settings")}
+              >
+                <Icon as={Clock3} />
+                <span>
+                  Backup not done today
+                  <small>Back up now in Settings</small>
+                </span>
+              </button>
+            )}
+            {due.length > 0 && (
+              <button
+                className="nav-item alert-item"
+                onClick={() => goto("/loans")}
+              >
+                <Icon as={Hourglass} />
+                <span>
+                  {due.length} girvi / EMI due
+                  {overdueCount > 0 ? ` (${overdueCount} overdue)` : ""}
+                  <small>{rupee(dueBalance, 2)} balance due</small>
+                </span>
+              </button>
+            )}
+          </div>
+        )}
         <div className="side-bottom">
           <div className="guide-box">
             <span className="guide-star">✧</span>
