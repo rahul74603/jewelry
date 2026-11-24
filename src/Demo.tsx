@@ -1,9 +1,13 @@
 import { useRef, useState } from "react";
-import { demoMutation, seedDemo } from "./lib/demo";
+import {
+  demoMutation,
+  loadDemoWorkspace,
+  saveDemoWorkspace,
+} from "./lib/demo";
 import { Shop } from "./lib/store";
 import { Shell } from "./components/Shell";
 export default function Demo() {
-  const [data, setData] = useState(seedDemo);
+  const [data, setData] = useState(loadDemoWorkspace);
   const ref = useRef(data);
   return (
     <Shop.Provider
@@ -13,6 +17,7 @@ export default function Demo() {
         perform: async (a, p) => {
           const next = demoMutation(ref.current, a, p);
           ref.current = next;
+          saveDemoWorkspace(next);
           setData(next);
         },
       }}

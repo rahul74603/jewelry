@@ -38,6 +38,71 @@ import {
   documentNumber,
   isSale,
 } from "../../functions/src/core/documents";
+import type { PrefsStore } from "./backup";
+
+/** localStorage key for the Demo (Customer APK) workspace. The Demo
+ * build has no server, so the workspace lives here — without it, every
+ * app restart re-ran `seedDemo()` and "Start fresh" (plus any bill,
+ * customer or girvi the shopkeeper entered) was lost. */
+export const DEMO_WORKSPACE_KEY = "aurum:demo-workspace-v1";
+
+/** Minimal key/value store, same shape backup.ts uses: localStorage in
+ * the Capacitor WebView, a memory store in tests. */
+const localDemoStore: PrefsStore = {
+  get: (key) => {
+    try {
+      return typeof localStorage === "undefined"
+        ? null
+        : localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  set: (key, value) => {
+    try {
+      if (typeof localStorage !== "undefined")
+        localStorage.setItem(key, value);
+    } catch (e) {
+      // Quota / unavailable: warn, never swallow silently — a failed
+      // save would resurrect the old workspace on the next launch.
+      console.warn("Demo workspace could not be saved:", e);
+    }
+  },
+};
+
+/** Load the persisted Demo workspace. Missing, unreadable or invalid
+ * data falls back to the sample workspace — and saves it, so the first
+ * launch still shows sample data and later launches reload it. */
+export function loadDemoWorkspace(
+  store: PrefsStore = localDemoStore,
+): Workspace {
+  try {
+    const raw = store.get(DEMO_WORKSPACE_KEY);
+    if (raw)
+      return workspaceSchema.parse(JSON.parse(raw)) as unknown as Workspace;
+  } catch {
+    // Corrupt / outdated payload: fall through to re-seeding below.
+  }
+  const seeded = seedDemo();
+  saveDemoWorkspace(seeded, store);
+  return seeded;
+}
+
+/** Persist the Demo workspace. A storage failure only warns — the
+ * in-memory mutation still applies — but it is never silent, because
+ * a failed save (e.g. after clearWorkspace / restore) would bring the
+ * old workspace back on the next launch. */
+export function saveDemoWorkspace(
+  data: Workspace,
+  store: PrefsStore = localDemoStore,
+): void {
+  try {
+    store.set(DEMO_WORKSPACE_KEY, JSON.stringify(data));
+  } catch (e) {
+    console.warn("Demo workspace could not be saved:", e);
+  }
+}
+
 export function seedDemo(): Workspace {
   const profile = {
     ...makeProfile("Sample Jewellery Studio", "Studio Owner", ""),
