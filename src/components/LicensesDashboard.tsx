@@ -7,7 +7,7 @@ import {
   setOfflineLicenseStatus,
   type OfflineDeviceRow,
 } from "../lib/licenseAdmin";
-import { isFirebaseConfigured } from "../lib/firebaseClient";
+import { isLicenseAdminConfigured } from "../lib/licenseServer";
 import { err } from "../lib/format";
 import { Brand, Problem } from "./ui";
 
@@ -21,7 +21,7 @@ import { Brand, Problem } from "./ui";
  * status) with Block/Unblock. Right/below: the local issued-keys
  * register, IF Part 1's register module exists in this build.
  *
- * When Firebase is not configured in this build, the server list
+ * When the license server is not configured in this build, the server list
  * shows a clear "not connected" state instead of failing — the
  * Master app still works offline for key generation.
  */
@@ -78,7 +78,7 @@ function fmtTime(ms: number): string {
 export default function LicensesDashboard({
   localRegister,
 }: LicensesDashboardProps) {
-  const connected = isFirebaseConfigured();
+  const connected = isLicenseAdminConfigured();
   const [devices, setDevices] = useState<OfflineDeviceRow[]>([]);
   const [register, setRegister] = useState<LocalRegisterRow[] | null>(
     localRegister ?? null,
@@ -162,9 +162,9 @@ export default function LicensesDashboard({
           </p>
           {!connected ? (
             <p className="muted">{NOT_CONFIGURED_MESSAGE} — key
-            generation below still works offline. Deploy the server
-            functions and rebuild with Firebase config to enable this
-            list.</p>
+            generation below still works offline. Deploy the license
+            server and rebuild with the license server URL and admin
+            token to enable this list.</p>
           ) : (
             <div className="auth-form">
               <button

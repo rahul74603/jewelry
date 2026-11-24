@@ -27,8 +27,8 @@ export default function Demo() {
     let alive = true;
     // Heartbeat: at most once a day, only when online. Sends ONLY
     // deviceId + shopName + model + appVersion (block/unlock +
-    // presence — nothing else goes online). No-op when Firebase is
-    // not configured; any failure leaves the app fully working.
+    // presence — nothing else goes online). No-op when the license
+    // server is not configured; any failure leaves the app fully working.
     const check = async () => {
       if (!navigator.onLine) return;
       try {

@@ -1,24 +1,37 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const state = vi.hoisted(() => ({
-  configured: false,
+  serverConfigured: false,
+  adminConfigured: false,
   status: "active" as "active" | "blocked",
   fail: false,
+  licenses: [] as Array<{
+    deviceId: string;
+    shopName: string;
+    model: string;
+    appVersion: string;
+    status: "active" | "blocked";
+    firstSeen: number;
+    lastSeen: number;
+    heartbeatCount: number;
+  }>,
 }));
 
-vi.mock("../src/lib/firebaseClient", () => ({
-  isFirebaseConfigured: () => state.configured,
-  getFunctionsApi: async () => ({ fake: true }),
-}));
-
-const callableFn = vi.hoisted(() =>
+const heartbeatFn = vi.hoisted(() =>
   vi.fn(async () => {
     if (state.fail) throw Error("network down");
-    return { data: { status: state.status } };
+    return { status: state.status };
   }),
 );
-vi.mock("firebase/functions", () => ({
-  httpsCallable: () => callableFn,
+const listFn = vi.hoisted(() => vi.fn(async () => state.licenses));
+const setStatusFn = vi.hoisted(() => vi.fn(async () => undefined));
+
+vi.mock("../src/lib/licenseServer", () => ({
+  isLicenseServerConfigured: () => state.serverConfigured,
+  isLicenseAdminConfigured: () => state.adminConfigured,
+  heartbeat: heartbeatFn,
+  listLicenses: listFn,
+  setLicenseStatus: setStatusFn,
 }));
 
 import {
@@ -37,37 +50,6 @@ import {
   setOfflineLicenseStatus,
   NOT_CONFIGURED_MESSAGE,
 } from "../src/lib/licenseAdmin";
-
-vi.mock("../src/lib/cloud", () => ({
-  company: vi.fn(async (op: string) => {
-    if (op === "offlineLicenses")
-      return {
-        devices: [
-          {
-            deviceId: "bbbb2222cccc",
-            shopName: "Second Shop",
-            model: "Pixel 8",
-            appVersion: "1.0.35",
-            status: "active",
-            firstSeen: 1000,
-            lastSeen: 2000,
-            heartbeatCount: 3,
-          },
-          {
-            deviceId: "aaaa-1111-2222",
-            shopName: "First Shop",
-            model: "",
-            appVersion: "dev",
-            status: "blocked",
-            firstSeen: 500,
-            lastSeen: 9000,
-            heartbeatCount: 1,
-          },
-        ],
-      };
-    return { ok: true };
-  }),
-}));
 
 // vitest runs in node by default: provide a minimal localStorage.
 function installStorage() {
@@ -93,26 +75,28 @@ const args = {
 
 describe("license heartbeat: no-op when unconfigured", () => {
   beforeEach(() => {
-    state.configured = false;
+    state.serverConfigured = false;
+    state.adminConfigured = false;
     state.fail = false;
     localStorage.clear();
-    callableFn.mockClear();
+    heartbeatFn.mockClear();
   });
 
-  it("never touches Firebase and never throws", async () => {
+  it("never touches the server and never throws", async () => {
     const r = await checkLicenseHeartbeat(args);
     expect(r).toEqual({ skipped: true, status: "active" });
-    expect(callableFn).not.toHaveBeenCalled();
+    expect(heartbeatFn).not.toHaveBeenCalled();
     expect(isLicenseBlocked()).toBe(false);
   });
 });
 
 describe("license heartbeat: blocked flag", () => {
   beforeEach(() => {
-    state.configured = true;
+    state.serverConfigured = true;
+    state.adminConfigured = true;
     state.fail = false;
     localStorage.clear();
-    callableFn.mockClear();
+    heartbeatFn.mockClear();
   });
 
   it("sets the blocked flag when the server says blocked", async () => {
@@ -143,17 +127,18 @@ describe("license heartbeat: blocked flag", () => {
   it("an invalid device id is a no-op, not a crash", async () => {
     const r = await checkLicenseHeartbeat({ ...args, deviceId: "not-a-device" });
     expect(r).toEqual({ skipped: true, status: "active" });
-    expect(callableFn).not.toHaveBeenCalled();
+    expect(heartbeatFn).not.toHaveBeenCalled();
   });
 });
 
 describe("license heartbeat: once-a-day throttle", () => {
   beforeEach(() => {
-    state.configured = true;
+    state.serverConfigured = true;
+    state.adminConfigured = true;
     state.fail = false;
     state.status = "active";
     localStorage.clear();
-    callableFn.mockClear();
+    heartbeatFn.mockClear();
   });
 
   it("skips the call when a check ran within the last day", async () => {
@@ -161,7 +146,7 @@ describe("license heartbeat: once-a-day throttle", () => {
     expect(shouldCheckLicense()).toBe(false);
     const r = await maybeCheckLicenseHeartbeat(args);
     expect(r.skipped).toBe(true);
-    expect(callableFn).not.toHaveBeenCalled();
+    expect(heartbeatFn).not.toHaveBeenCalled();
   });
 
   it("calls again after 24 hours have passed", async () => {
@@ -172,7 +157,7 @@ describe("license heartbeat: once-a-day throttle", () => {
     expect(shouldCheckLicense()).toBe(true);
     const r = await maybeCheckLicenseHeartbeat(args);
     expect(r.skipped).toBeUndefined();
-    expect(callableFn).toHaveBeenCalledTimes(1);
+    expect(heartbeatFn).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -185,21 +170,47 @@ describe("getDeviceModel", () => {
 
 describe("license admin (Master dashboard client)", () => {
   beforeEach(() => {
-    callableFn.mockClear();
+    heartbeatFn.mockClear();
+    listFn.mockClear();
+    setStatusFn.mockClear();
+    state.licenses = [
+      {
+        deviceId: "bbbb2222cccc",
+        shopName: "Second Shop",
+        model: "Pixel 8",
+        appVersion: "1.0.35",
+        status: "active",
+        firstSeen: 1000,
+        lastSeen: 2000,
+        heartbeatCount: 3,
+      },
+      {
+        deviceId: "aaaa-1111-2222",
+        shopName: "First Shop",
+        model: "",
+        appVersion: "dev",
+        status: "blocked",
+        firstSeen: 500,
+        lastSeen: 9000,
+        heartbeatCount: 1,
+      },
+    ];
   });
 
-  it("refuses to call the server when Firebase is not configured", async () => {
-    state.configured = false;
+  it("refuses to call the server when the license server is not configured", async () => {
+    state.adminConfigured = false;
     await expect(listOfflineLicenses()).rejects.toThrow(
       NOT_CONFIGURED_MESSAGE,
     );
     await expect(
       setOfflineLicenseStatus("ABCD-1234-EF01", "blocked"),
     ).rejects.toThrow(NOT_CONFIGURED_MESSAGE);
+    expect(listFn).not.toHaveBeenCalled();
+    expect(setStatusFn).not.toHaveBeenCalled();
   });
 
   it("maps server rows: normalises ids, newest lastSeen first", async () => {
-    state.configured = true;
+    state.adminConfigured = true;
     const rows = await listOfflineLicenses();
     expect(rows.map((r) => r.deviceId)).toEqual([
       "AAAA11112222",
@@ -208,5 +219,13 @@ describe("license admin (Master dashboard client)", () => {
     expect(rows[0].status).toBe("blocked");
     expect(rows[0].shopName).toBe("First Shop");
     expect(rows[1].heartbeatCount).toBe(3);
+  });
+
+  it("block/unblock sends the normalised id and the new status", async () => {
+    state.adminConfigured = true;
+    await setOfflineLicenseStatus("abcd-1234-ef01", "blocked");
+    expect(setStatusFn).toHaveBeenCalledWith("ABCD1234EF01", "blocked");
+    await setOfflineLicenseStatus("ABCD1234EF01", "active");
+    expect(setStatusFn).toHaveBeenCalledWith("ABCD1234EF01", "active");
   });
 });

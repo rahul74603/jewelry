@@ -2,7 +2,7 @@ import {
   normalizeOfflineDeviceId,
   type OfflineLicenseStatus,
 } from "../../functions/src/core/offlineLicense";
-import { getFunctionsApi, isFirebaseConfigured } from "./firebaseClient";
+import { heartbeat, isLicenseServerConfigured } from "./licenseServer";
 
 /**
  * Offline-license heartbeat (kill switch + presence).
@@ -13,11 +13,13 @@ import { getFunctionsApi, isFirebaseConfigured } from "./firebaseClient";
  * model, appVersion. Nothing else goes online — no billing, no data
  * sync, no server workspace.
  *
- * When Firebase is not configured (the shipped Demo/Master APKs),
- * every call is a NO-OP that never throws and never touches
- * Firebase: the app keeps working FULLY OFFLINE. A failed check
- * (network error, server down) NEVER blocks the app — it reports
- * active and leaves the local flag alone.
+ * The server is the Cloudflare Workers license server (see
+ * src/lib/licenseServer.ts). When it is not configured (no
+ * VITE_LICENSE_SERVER_URL in the build), every call is a NO-OP
+ * that never throws and never touches the network: the app keeps
+ * working FULLY OFFLINE. A failed check (network error, server
+ * down) NEVER blocks the app — it reports active and leaves the
+ * local flag alone.
  */
 
 export const LICENSE_BLOCKED_KEY = "aurum:license-blocked";
@@ -84,7 +86,7 @@ export type HeartbeatArgs = {
 export async function checkLicenseHeartbeat(
   args: HeartbeatArgs,
 ): Promise<HeartbeatResult> {
-  if (!isFirebaseConfigured())
+  if (!isLicenseServerConfigured())
     return { skipped: true, status: "active" };
   let deviceId: string;
   try {
@@ -93,28 +95,17 @@ export async function checkLicenseHeartbeat(
     return { skipped: true, status: "active" };
   }
   try {
-    const api = await getFunctionsApi();
-    // Lazy too: importing firebase/functions statically would pull
-    // the Firebase SDK into the Demo bundle even when unconfigured.
-    const { httpsCallable } = await import("firebase/functions");
-    const { data } = await httpsCallable<
-      HeartbeatArgs,
-      { status: OfflineLicenseStatus }
-    >(
-      api,
-      "licenseHeartbeat",
-    )({
+    const { status } = await heartbeat({
       deviceId,
       shopName: args.shopName.trim().slice(0, 100),
       model: args.model.trim().slice(0, 100),
       appVersion: args.appVersion.trim().slice(0, 20),
     });
-    const status = data?.status === "blocked" ? "blocked" : "active";
     setLicenseBlocked(status === "blocked");
     markLicenseChecked();
     return { status };
   } catch {
-    // Offline, server down, App Check rejected — never block the app.
+    // Offline, server down, rate-limited — never block the app.
     return { status: "active", error: true };
   }
 }

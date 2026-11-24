@@ -4,28 +4,32 @@ import {
   type OfflineLicenseDoc,
   type OfflineLicenseStatus,
 } from "../../functions/src/core/offlineLicense";
-import { isFirebaseConfigured } from "./firebaseClient";
+import {
+  isLicenseAdminConfigured,
+  listLicenses,
+  setLicenseStatus,
+} from "./licenseServer";
 
 /**
  * Master-side admin client for the offline-license kill switch.
- * Uses the existing `company()` helper from cloud.ts via dynamic
- * import, so Firebase is only touched when configured — the Master
- * build ships unconfigured too, and must not break.
+ * Talks to the Cloudflare Workers license server (see
+ * src/lib/licenseServer.ts) over plain fetch — no Firebase here.
+ * The Master build ships with the server URL + admin token as
+ * build-time env vars; without them every call throws the
+ * not-connected message and the dashboard shows its offline state.
  *
- * Ops (server: companyConsole, admin-only): `offlineLicenses`
- * (list all devices) and `offlineLicenseStatus` (block/unblock one).
- * Presence + block/unlock only — no billing, no data sync.
+ * Ops: `listLicenses` (all devices) and `setLicenseStatus`
+ * (block/unblock one). Presence + block/unlock only — no billing,
+ * no data sync.
  */
 
 export type OfflineDeviceRow = OfflineLicenseDoc;
 
 export const NOT_CONFIGURED_MESSAGE =
-  "Server not connected — Firebase is not configured in this build";
+  "Server not connected — license server is not configured in this build";
 
-async function companyOp<T>(op: string, data: unknown = {}): Promise<T> {
-  if (!isFirebaseConfigured()) throw Error(NOT_CONFIGURED_MESSAGE);
-  const { company } = await import("./cloud");
-  return company<T>(op, data);
+function requireAdminConfigured(): void {
+  if (!isLicenseAdminConfigured()) throw Error(NOT_CONFIGURED_MESSAGE);
 }
 
 function mapRow(d: OfflineLicenseDoc): OfflineDeviceRow {
@@ -43,9 +47,8 @@ function mapRow(d: OfflineLicenseDoc): OfflineDeviceRow {
 
 /** All devices that ever phoned home, newest heartbeat first. */
 export async function listOfflineLicenses(): Promise<OfflineDeviceRow[]> {
-  const { devices } = await companyOp<{ devices: OfflineLicenseDoc[] }>(
-    "offlineLicenses",
-  );
+  requireAdminConfigured();
+  const devices = await listLicenses();
   return (devices ?? []).map(mapRow).sort((a, b) => b.lastSeen - a.lastSeen);
 }
 
@@ -55,7 +58,8 @@ export async function setOfflineLicenseStatus(
   status: OfflineLicenseStatus,
 ): Promise<void> {
   const id = normalizeOfflineDeviceId(deviceId);
-  await companyOp("offlineLicenseStatus", { deviceId: id, status });
+  requireAdminConfigured();
+  await setLicenseStatus(id, status);
 }
 
 export function displayDeviceId(deviceId: string): string {
