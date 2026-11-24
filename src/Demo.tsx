@@ -11,6 +11,7 @@ import { getDeviceId } from "./lib/offlineActivation";
 import {
   getDeviceModel,
   isLicenseBlocked,
+  LICENSE_CHECK_INTERVAL_MS,
   maybeCheckLicenseHeartbeat,
 } from "./lib/licenseCheck";
 
@@ -25,10 +26,11 @@ export default function Demo() {
   const [blocked, setBlocked] = useState(() => isLicenseBlocked());
   useEffect(() => {
     let alive = true;
-    // Heartbeat: at most once a day, only when online. Sends ONLY
-    // deviceId + shopName + model + appVersion (block/unlock +
-    // presence — nothing else goes online). No-op when the license
-    // server is not configured; any failure leaves the app fully working.
+    // Heartbeat: on open, on foreground, and every 5 minutes while
+    // the app stays open, only when online. Sends ONLY deviceId +
+    // shopName + model + appVersion (block/unlock + presence —
+    // nothing else goes online). No-op when the license server is
+    // not configured; any failure leaves the app fully working.
     const check = async () => {
       if (!navigator.onLine) return;
       try {
@@ -54,8 +56,17 @@ export default function Demo() {
       if (document.visibilityState === "visible") void check();
     };
     document.addEventListener("visibilitychange", onVisible);
+    // Re-check while the app stays open in the foreground: a block
+    // issued from the Master app must lock this app without waiting
+    // for a restart. Same 5-minute throttle as the heartbeat itself,
+    // so the interval never spams the server.
+    const timer = window.setInterval(
+      () => void check(),
+      LICENSE_CHECK_INTERVAL_MS,
+    );
     return () => {
       alive = false;
+      window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);

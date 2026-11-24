@@ -5,6 +5,7 @@ import {
   isLicenseAdminConfigured,
   heartbeat,
   listLicenses,
+  removeLicense,
   setLicenseStatus,
 } from "../src/lib/licenseServer";
 
@@ -202,6 +203,48 @@ describe("licenseServer transport", () => {
     await expect(
       setLicenseStatus("aabbccddeeff", "blocked"),
     ).rejects.toThrow("not found");
+  });
+
+  it("removeLicense sends DELETE with the Bearer token and a normalised id", async () => {
+    fetchFn.mockResolvedValueOnce(jsonResponse({ ok: true }));
+    await removeLicense("ABCD-1234-EF01");
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`${BASE}/licenses/abcd1234ef01`);
+    expect(init.method).toBe("DELETE");
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      `Bearer ${TOKEN}`,
+    );
+    expect(init.body).toBeUndefined();
+  });
+
+  it("removeLicense throws the server message on a 404", async () => {
+    fetchFn.mockResolvedValueOnce(jsonResponse({ error: "not found" }, 404));
+    await expect(removeLicense("aabbccddeeff")).rejects.toThrow("not found");
+  });
+
+  it("removeLicense throws the server message on a 401", async () => {
+    fetchFn.mockResolvedValueOnce(
+      jsonResponse({ error: "unauthorized" }, 401),
+    );
+    await expect(removeLicense("aabbccddeeff")).rejects.toThrow(
+      "unauthorized",
+    );
+  });
+
+  it("removeLicense throws on a network failure", async () => {
+    fetchFn.mockRejectedValueOnce(Error("network down"));
+    await expect(removeLicense("aabbccddeeff")).rejects.toThrow(
+      "network down",
+    );
+  });
+
+  it("removeLicense refuses without a token, without touching the network", async () => {
+    vi.stubEnv("VITE_LICENSE_ADMIN_TOKEN", "");
+    await expect(removeLicense("aabbccddeeff")).rejects.toThrow(
+      "admin token",
+    );
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 
   it("throws when the server URL is not configured", async () => {

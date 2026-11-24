@@ -25,6 +25,7 @@ const heartbeatFn = vi.hoisted(() =>
 );
 const listFn = vi.hoisted(() => vi.fn(async () => state.licenses));
 const setStatusFn = vi.hoisted(() => vi.fn(async () => undefined));
+const removeFn = vi.hoisted(() => vi.fn(async () => undefined));
 
 vi.mock("../src/lib/licenseServer", () => ({
   isLicenseServerConfigured: () => state.serverConfigured,
@@ -32,6 +33,7 @@ vi.mock("../src/lib/licenseServer", () => ({
   heartbeat: heartbeatFn,
   listLicenses: listFn,
   setLicenseStatus: setStatusFn,
+  removeLicense: removeFn,
 }));
 
 import {
@@ -47,6 +49,7 @@ import {
 } from "../src/lib/licenseCheck";
 import {
   listOfflineLicenses,
+  removeOfflineLicense,
   setOfflineLicenseStatus,
   NOT_CONFIGURED_MESSAGE,
 } from "../src/lib/licenseAdmin";
@@ -205,8 +208,12 @@ describe("license admin (Master dashboard client)", () => {
     await expect(
       setOfflineLicenseStatus("ABCD-1234-EF01", "blocked"),
     ).rejects.toThrow(NOT_CONFIGURED_MESSAGE);
+    await expect(removeOfflineLicense("ABCD-1234-EF01")).rejects.toThrow(
+      NOT_CONFIGURED_MESSAGE,
+    );
     expect(listFn).not.toHaveBeenCalled();
     expect(setStatusFn).not.toHaveBeenCalled();
+    expect(removeFn).not.toHaveBeenCalled();
   });
 
   it("maps server rows: normalises ids, newest lastSeen first", async () => {
@@ -227,5 +234,13 @@ describe("license admin (Master dashboard client)", () => {
     expect(setStatusFn).toHaveBeenCalledWith("ABCD1234EF01", "blocked");
     await setOfflineLicenseStatus("ABCD1234EF01", "active");
     expect(setStatusFn).toHaveBeenCalledWith("ABCD1234EF01", "active");
+  });
+
+  it("remove sends the normalised id", async () => {
+    state.adminConfigured = true;
+    await removeOfflineLicense("abcd-1234-ef01");
+    expect(removeFn).toHaveBeenCalledWith("ABCD1234EF01");
+    await removeOfflineLicense("ABCD1234EF01");
+    expect(removeFn).toHaveBeenCalledTimes(2);
   });
 });

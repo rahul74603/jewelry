@@ -14,8 +14,10 @@ import type {
  *
  * SCOPE (Ajay, 2026-11-24 19:02 IST): online ONLY for block/unlock
  * + presence. The heartbeat sends exactly four fields
- * (deviceId, shopName, model, appVersion); admin calls list devices
- * and block/unblock one. Nothing else goes online.
+ * (deviceId, shopName, model, appVersion); admin calls list devices,
+ * block/unblock one, and remove one presence row (stale/uninstalled
+ * devices only — a phone that still has the app re-appears on its
+ * next heartbeat). Nothing else goes online.
  *
  * Env (Vite build-time):
  * - VITE_LICENSE_SERVER_URL — Worker base URL, both builds.
@@ -52,7 +54,7 @@ function wireDeviceId(deviceId: string): string {
 }
 
 type RequestOptions = {
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "DELETE";
   body?: unknown;
   admin?: boolean;
 };
@@ -161,6 +163,18 @@ export async function setLicenseStatus(
   const action = status === "blocked" ? "block" : "unblock";
   await requestJson(`/licenses/${wireDeviceId(deviceId)}/${action}`, {
     method: "POST",
+    admin: true,
+  });
+}
+
+/**
+ * Remove one device's presence row (admin). 404 when the device is
+ * unknown. Only clears the list entry — a phone that still has the
+ * app re-appears on its next heartbeat as a fresh active device.
+ */
+export async function removeLicense(deviceId: string): Promise<void> {
+  await requestJson(`/licenses/${wireDeviceId(deviceId)}`, {
+    method: "DELETE",
     admin: true,
   });
 }

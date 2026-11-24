@@ -4,6 +4,7 @@ import {
   displayDeviceId,
   listOfflineLicenses,
   NOT_CONFIGURED_MESSAGE,
+  removeOfflineLicense,
   setOfflineLicenseStatus,
   type OfflineDeviceRow,
 } from "../lib/licenseAdmin";
@@ -145,6 +146,25 @@ export default function LicensesDashboard({
     }
   };
 
+  const remove = async (d: OfflineDeviceRow) => {
+    if (
+      !window.confirm(
+        `Remove ${displayDeviceId(d.deviceId)} (${d.shopName || "unknown shop"}) from this list? This only clears the entry here — if that phone still has the app, it will re-appear on its next heartbeat.`,
+      )
+    )
+      return;
+    setBusyId(d.deviceId);
+    setError("");
+    try {
+      await removeOfflineLicense(d.deviceId);
+      await load();
+    } catch (e) {
+      setError(err(e));
+    } finally {
+      setBusyId("");
+    }
+  };
+
   return (
     <main className="auth-page">
       <div className="auth-wrap">
@@ -157,7 +177,7 @@ export default function LicensesDashboard({
           <h1>Devices &amp; kill switch</h1>
           <p className="muted">
             Every phone that sent a heartbeat — block one and its app
-            locks on its next daily check. Online for block/unlock and
+            locks on its next check. Online for block/unlock and
             presence only; nothing else leaves the phone.
           </p>
           {!connected ? (
@@ -175,10 +195,15 @@ export default function LicensesDashboard({
                 <RefreshCw size={14} /> {loading ? "Loading…" : "Refresh"}
               </button>
               <Problem message={error} />
+              <p className="muted">
+                Remove is for phones that were uninstalled — it only
+                clears the entry here. A phone that still has the app
+                will re-appear on its next heartbeat.
+              </p>
               {devices.length === 0 && !loading && !error ? (
                 <p className="muted">
                   No devices have phoned home yet. A device appears here
-                  after its first heartbeat (once a day, when online).
+                  after its first heartbeat (when online).
                 </p>
               ) : (
                 <div>
@@ -212,13 +237,28 @@ export default function LicensesDashboard({
                         {d.heartbeatCount} check
                         {d.heartbeatCount === 1 ? "" : "s"}
                       </p>
-                      <button
-                        className="btn outline"
-                        disabled={busyId === d.deviceId}
-                        onClick={() => void toggle(d)}
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "8px",
+                          flexWrap: "wrap",
+                        }}
                       >
-                        {d.status === "blocked" ? "Unblock" : "Block"}
-                      </button>
+                        <button
+                          className="btn outline"
+                          disabled={busyId === d.deviceId}
+                          onClick={() => void toggle(d)}
+                        >
+                          {d.status === "blocked" ? "Unblock" : "Block"}
+                        </button>
+                        <button
+                          className="btn outline"
+                          disabled={busyId === d.deviceId}
+                          onClick={() => void remove(d)}
+                        >
+                          Remove
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
