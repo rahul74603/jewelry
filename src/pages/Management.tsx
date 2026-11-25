@@ -110,6 +110,7 @@ import {
 } from "../lib/autoSms";
 import { InvoiceTable } from "./Dashboard";
 import { getDeviceId } from "../lib/offlineActivation";
+import { demoSampleRecords } from "../lib/demo";
 
 /** Build version baked in by CI (VITE_APP_VERSION=1.0.<run number>);
  * "dev" for local builds without the variable. Shown at the bottom of
@@ -1194,6 +1195,82 @@ function AutoSmsSection() {
   );
 }
 /**
+ * Demo data (Settings). One tap fills a fresh/empty workspace with
+ * just enough to make the first bill immediately — a Gold 22K rate, a
+ * Silver 925 rate, one sample 22K ring and one demo customer. Only
+ * the records that are not already present are added, so pressing it
+ * twice never duplicates anything. Real shop data is never touched.
+ */
+function DemoDataSection() {
+  const { data, perform } = useShop(),
+    notify = useToast(),
+    [busy, setBusy] = useState(false),
+    [error, E] = useState("");
+  const sample = demoSampleRecords();
+  const missing = {
+    rates: sample.rates.filter(
+      (r) =>
+        !data.rates.some(
+          (x) => x.metal === r.metal && x.purity === r.purity,
+        ),
+    ),
+    products: sample.products.filter(
+      (p) => !data.products.some((x) => x.sku === p.sku),
+    ),
+    customers: sample.customers.filter(
+      (c) => !data.customers.some((x) => x.id === c.id),
+    ),
+  };
+  const missingCount =
+    missing.rates.length + missing.products.length + missing.customers.length;
+  const fill = async () => {
+    setBusy(true);
+    E("");
+    try {
+      for (const r of missing.rates) await perform("rate", r);
+      for (const p of missing.products) await perform("product", p);
+      for (const c of missing.customers) await perform("customer", c);
+      notify(
+        `Demo data bhar diya — ${missing.rates.length} rate, ${missing.products.length} product, ${missing.customers.length} customer.`,
+      );
+    } catch (e) {
+      E(err(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="panel settings-panel">
+      <div className="section-kicker">
+        <i />
+        DEMO DATA
+      </div>
+      <h2>Demo data bharo — pehla bill turant banao</h2>
+      <p className="muted">
+        Khaali app par pehla bill banane ke liye taiyaar sample: Gold 22K
+        ka rate, Silver 925 ka rate, ek 22K gold ring aur ek demo
+        customer. Jo cheez pehle se hai wo dobara nahi bhari jayegi.
+      </p>
+      <div className="settings-actions">
+        <span>
+          {missingCount === 0
+            ? "Demo data pehle se bhara hai."
+            : `${missing.rates.length} rate · ${missing.products.length} product · ${missing.customers.length} customer bhare jayenge.`}
+        </span>
+        <button
+          className="btn primary"
+          disabled={busy || missingCount === 0}
+          onClick={fill}
+        >
+          <Plus size={15} />
+          Demo data bharo
+        </button>
+      </div>
+      <Problem message={error} />
+    </section>
+  );
+}
+/**
  * Danger zone (Settings). "Start fresh" wipes every product,
  * customer, bill, draft, loan and rate on this phone and replaces
  * the workspace with an empty one — the shop profile (shop name,
@@ -1691,6 +1768,7 @@ export function Settings() {
       </form>
       <BackupRestoreSection />
       <AutoSmsSection />
+      <DemoDataSection />
       <DangerZoneSection />
       {deviceId && (
         <p className="muted">

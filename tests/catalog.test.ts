@@ -6,6 +6,12 @@ import {
   PURITY_BY_METAL,
   puritiesFor,
 } from "../src/lib/catalog";
+import { demoSampleRecords } from "../src/lib/demo";
+import {
+  productSchema,
+  rateSchema,
+  customerSchema,
+} from "../functions/src/core/model";
 
 describe("Catalogue dropdown lists", () => {
   it("offers every metal a jewellery shop trades in", () => {
@@ -44,5 +50,35 @@ describe("Catalogue dropdown lists", () => {
 
   it("keeps a manual option for anything not listed", () => {
     expect(OTHER_OPTION).toBe("Other");
+  });
+});
+
+describe("Demo sample data (one-tap)", () => {
+  it("seeds a Gold 22K rate, a Silver 925 rate, one ring and one customer — all schema-valid", () => {
+    const s = demoSampleRecords(new Date("2026-11-25T12:00:00.000Z"));
+    expect(s.rates.map((r) => r.metal + " " + r.purity)).toEqual([
+      "Gold 22K",
+      "Silver 925",
+    ]);
+    expect(s.products).toHaveLength(1);
+    expect(s.products[0].metal).toBe("Gold");
+    expect(s.products[0].purity).toBe("22K");
+    expect(s.products[0].stock).toBeGreaterThan(0);
+    expect(s.customers).toHaveLength(1);
+    for (const r of s.rates) expect(rateSchema.safeParse(r).success).toBe(true);
+    for (const p of s.products)
+      expect(productSchema.safeParse(p).success).toBe(true);
+    for (const c of s.customers)
+      expect(customerSchema.safeParse(c).success).toBe(true);
+  });
+
+  it("uses stable ids so a second tap can skip what is already there", () => {
+    const a = demoSampleRecords();
+    const b = demoSampleRecords();
+    expect(a.rates.map((r) => r.id)).toEqual(b.rates.map((r) => r.id));
+    expect(a.products.map((p) => p.id)).toEqual(b.products.map((p) => p.id));
+    expect(a.customers.map((c) => c.id)).toEqual(
+      b.customers.map((c) => c.id),
+    );
   });
 });

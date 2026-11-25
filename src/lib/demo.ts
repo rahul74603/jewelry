@@ -344,6 +344,76 @@ export function seedDemo(): Workspace {
   }
   return w;
 }
+/**
+ * Minimal demo set for a fresh/empty workspace — one tap fills just
+ * enough to make the first bill immediately: a Gold 22K rate, a
+ * Silver 925 rate, one sample 22K ring and one demo customer. Rates
+ * match the full sample workspace (seedDemo) so a demo bill prices
+ * the same either way. The caller adds only the records that are not
+ * already present (same metal+purity rate, same SKU, same customer
+ * id), so pressing the button twice never duplicates anything.
+ */
+export function demoSampleRecords(now = new Date()): {
+  rates: Rate[];
+  products: Product[];
+  customers: {
+    id: string;
+    name: string;
+    phone: string;
+    email: string;
+    address: string;
+    gstin: string;
+  }[];
+} {
+  const at = now.toISOString();
+  return {
+    rates: [
+      {
+        id: "demo-rate-gold-22k",
+        metal: "Gold",
+        purity: "22K",
+        rate: 11440,
+        effectiveAt: at,
+      },
+      {
+        id: "demo-rate-silver-925",
+        metal: "Silver",
+        purity: "925",
+        rate: 150.3,
+        effectiveAt: at,
+      },
+    ],
+    products: [
+      {
+        id: "demo-product-ring",
+        sku: "DEMO-0001",
+        name: "Classic gold band",
+        category: "Rings",
+        metal: "Gold",
+        purity: "22K",
+        gross: 3.24,
+        stone: 0,
+        deduction: 0,
+        stock: 5,
+        cost: 0,
+        makingMode: "Per gram",
+        making: 650,
+        hsn: "7113",
+        huid: "",
+      },
+    ],
+    customers: [
+      {
+        id: "demo-customer-1",
+        name: "Demo Grahak",
+        phone: "",
+        email: "",
+        address: "",
+        gstin: "",
+      },
+    ],
+  };
+}
 export function newLine(p: Product) {
   return {
     productId: p.id,

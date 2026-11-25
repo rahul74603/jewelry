@@ -1519,6 +1519,42 @@ td.muted {
 .problem svg {
   margin-top: 2px;
 }
+/* Prominent bill-screen alert (rate missing / udhar without a
+ * customer): same red language as .problem, but stacked with room
+ * for a button or a mini-form, so the shopkeeper sees what to do
+ * without scrolling or guessing. */
+.bill-alert {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 13px 0;
+  padding: 12px;
+  color: #944e3c;
+  background: #fcf0eb;
+  border: 1px solid #edd3c8;
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.bill-alert strong {
+  display: block;
+  font-size: 13px;
+}
+.bill-alert p {
+  margin: 2px 0 0;
+}
+.bill-alert .btn {
+  align-self: flex-start;
+}
+.bill-alert-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.bill-alert-actions .btn {
+  align-self: center;
+}
 .info-box {
   padding: 14px;
   background: #f4f6ed;

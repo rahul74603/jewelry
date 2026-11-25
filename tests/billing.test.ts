@@ -7,6 +7,7 @@ import {
   paise,
   currentRates,
 } from "../functions/src/core/billing";
+import { accountDelta } from "../functions/src/core/documents";
 import {
   makeProfile,
   emptyWorkspace,
@@ -307,5 +308,90 @@ describe("Draft payment intent", () => {
     expect(() => assertReviewedPayment(repriced, reviewed)).toThrow(
       "balance changed",
     );
+  });
+});
+
+describe("Shopkeeper demo flow (25 Nov 2026)", () => {
+  // Ajay's exact shop-counter scenario: a 22K gold ring, 5 g at
+  // ₹500/g (metal ₹2,500) + Fixed making ₹100 = ₹2,600 total.
+  const demoData = () => {
+    const d = data();
+    d.products = [
+      {
+        ...product,
+        id: "ring",
+        name: "Classic gold band",
+        category: "Rings",
+        metal: "Gold",
+        purity: "22K",
+        gross: 5,
+        stone: 0,
+        deduction: 0,
+        stock: 10,
+        cost: 0,
+        makingMode: "Fixed",
+        making: 100,
+      },
+    ];
+    d.rates = [
+      {
+        id: "r-gold-22k",
+        metal: "Gold",
+        purity: "22K",
+        rate: 500,
+        effectiveAt: "2026-01-01T00:00:00.000Z",
+      },
+    ];
+    return d;
+  };
+  const demoInput = (): InvoiceInput => ({
+    id: "demo1",
+    customerId: "",
+    type: "Non-GST bill",
+    items: [
+      {
+        productId: "ring",
+        quantity: 1,
+        makingMode: "Fixed",
+        making: 100,
+        wastagePct: 0,
+        stoneValue: 0,
+        otherCharges: 0,
+        discount: 0,
+      },
+    ],
+    paid: 2000,
+    settlement: "part",
+    mode: "Cash",
+  });
+
+  it("refuses a bill when the product's metal rate was never recorded, naming it", () => {
+    const d = demoData();
+    d.rates = [];
+    expect(() => calculateInvoice(d, demoInput(), date, "x")).toThrow(
+      "Add an effective rate for Gold 22K.",
+    );
+  });
+
+  it("refuses a partial payment with no customer, because the udhar needs a khata", () => {
+    const d = demoData(),
+      i = demoInput();
+    expect(() => calculateInvoice(d, i, date, "x")).toThrow(
+      "Select a customer for a credit or partial payment.",
+    );
+  });
+
+  it("finalizes the same ₹2,600 / ₹2,000 bill with a customer and posts ₹600 to their khata", () => {
+    const d = demoData(),
+      i = demoInput();
+    i.customerId = "c";
+    const b = calculateInvoice(d, i, date, "demo-2600");
+    expect(b.totalPaise).toBe(260000);
+    expect(b.lines[0].metalPaise).toBe(250000);
+    expect(b.paidPaise).toBe(200000);
+    expect(b.balancePaise).toBe(60000);
+    expect(b.customer?.id).toBe("c");
+    // The ₹600 balance is the customer's outstanding (udhar).
+    expect(accountDelta(b)).toBe(60000);
   });
 });

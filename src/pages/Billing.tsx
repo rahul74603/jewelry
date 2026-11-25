@@ -24,6 +24,7 @@ import {
   RotateCcw,
   FilePenLine,
   IndianRupee,
+  UserPlus,
 } from "lucide-react";
 import {
   draftSchema,
@@ -273,7 +274,12 @@ export function InvoiceEditor() {
     [busy, B] = useState(false),
     [modal, M] = useState(""),
     [query, Q] = useState(""),
-    [expand, X] = useState(-1);
+    [expand, X] = useState(-1),
+    // Inline "Naya customer jodo" mini-form (udhar box).
+    [showNewCust, setShowNewCust] = useState(false),
+    [newCustName, setNewCustName] = useState(""),
+    [newCustPhone, setNewCustPhone] = useState(""),
+    [custBusy, setCustBusy] = useState(false);
   const change = <K extends keyof InvoiceInput>(k: K, v: InvoiceInput[K]) => {
     E("");
     I((s) => ({ ...s, [k]: v }));
@@ -321,6 +327,76 @@ export function InvoiceEditor() {
   }, [data, invoice, advance]);
   const total = preview.b?.totalPaise ?? 0,
     settlement = paymentSelection(invoice, total);
+  // Rates missing for a product on this bill — the calc throws and the
+  // bill cannot be made, so say so plainly (in Hindi) as soon as the
+  // product is added, with a one-tap way to enter the rate.
+  const missingRates = useMemo(() => {
+    const rates = currentRates(data.rates);
+    const seen = new Set<string>();
+    const missing: { metal: string; purity: string }[] = [];
+    for (const l of invoice.items) {
+      const p = data.products.find((p) => p.id === l.productId);
+      if (!p) continue;
+      const k = p.metal + " " + p.purity;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      if (
+        !rates.some((r) => r.metal === p.metal && r.purity === p.purity)
+      )
+        missing.push({ metal: p.metal, purity: p.purity });
+    }
+    return missing;
+  }, [data.rates, data.products, invoice.items]);
+  // Udhar (partial payment) without a customer cannot finalize — the
+  // balance has to go to somebody's khata. Show that plainly, in
+  // Hindi, with the balance, before the shopkeeper presses Finalize.
+  const balancePaise = total - paise(invoice.paid);
+  const needsCustomer =
+    invoice.type !== "Estimate" &&
+    !advance &&
+    !invoice.customerId &&
+    total > 0 &&
+    paise(invoice.paid) < total;
+  // The calc's two confusing English prompts, in plain Hindi.
+  const friendlyError = (msg: string) => {
+    if (!msg) return msg;
+    if (msg === "Select a customer for a credit or partial payment.")
+      return "Udhar baki hai — pehle customer ka naam chuno.";
+    const rate = msg.match(/^Add an effective rate for (.+)\.$/);
+    if (rate)
+      return `${rate[1]} ka rate dala nahi hai — bina rate ke bill nahi banega.`;
+    return msg;
+  };
+  // Create the customer and put them straight on this bill, so the
+  // shopkeeper never has to leave the bill screen.
+  const addCustomerInline = async () => {
+    const name = newCustName.trim();
+    if (!name) {
+      E("Customer ka naam likho.");
+      return;
+    }
+    setCustBusy(true);
+    try {
+      const id = key();
+      await perform("customer", {
+        id,
+        name,
+        phone: newCustPhone.trim(),
+        email: "",
+        address: "",
+        gstin: "",
+      });
+      change("customerId", id);
+      setNewCustName("");
+      setNewCustPhone("");
+      setShowNewCust(false);
+      notify("Customer jod diya — udhar iske khaate me jayega.");
+    } catch (e) {
+      E(err(e));
+    } finally {
+      setCustBusy(false);
+    }
+  };
   const setPayment = (
     paid: number,
     settlement: FinalizeInput["settlement"],
@@ -689,6 +765,27 @@ export function InvoiceEditor() {
                   );
                 })
               )}
+              {missingRates.map(({ metal, purity }) => (
+                <div
+                  className="bill-alert"
+                  role="alert"
+                  key={metal + " " + purity}
+                >
+                  <div>
+                    <strong>
+                      {metal} {purity} ka rate dala nahi hai — bina rate ke
+                      bill nahi banega.
+                    </strong>
+                    <p>
+                      Pehle is metal ka aaj ka rate dalo, phir bill ka
+                      amount aayega.
+                    </p>
+                  </div>
+                  <Link className="btn primary" to="/rates">
+                    Rate dalo
+                  </Link>
+                </div>
+              ))}
               <button
                 className="btn outline full-btn"
                 onClick={() => M("items")}
@@ -822,9 +919,76 @@ export function InvoiceEditor() {
                 <small>Balance due</small>
                 <strong>{rupee(total - paise(invoice.paid), 2)}</strong>
               </div>
+              {needsCustomer && (
+                <div className="bill-alert" role="alert">
+                  <div>
+                    <strong>
+                      {rupee(balancePaise, 2)} udhar baki hai — kisike
+                      khaate me likhna hai, isliye pehle customer ka naam
+                      chuno.
+                    </strong>
+                    <p>
+                      Neeche customer jodo ya Full payment karo — bina
+                      customer ke udhar wala bill finalize nahi hoga.
+                    </p>
+                  </div>
+                  {!showNewCust ? (
+                    <div className="bill-alert-actions">
+                      <button
+                        className="btn outline"
+                        onClick={() => setShowNewCust(true)}
+                      >
+                        <UserPlus size={15} />
+                        Naya customer jodo
+                      </button>
+                      <button
+                        className="btn primary"
+                        onClick={() => setPayment(total / 100, "full")}
+                      >
+                        Full payment karo
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="form-grid">
+                      <Field label="Customer ka naam">
+                        <input
+                          value={newCustName}
+                          onChange={(e) => setNewCustName(e.target.value)}
+                          placeholder="e.g. Ramesh Kumar"
+                        />
+                      </Field>
+                      <Field label="Mobile (optional)">
+                        <input
+                          value={newCustPhone}
+                          onChange={(e) => setNewCustPhone(e.target.value)}
+                          placeholder="e.g. 98765 43210"
+                          inputMode="tel"
+                        />
+                      </Field>
+                      <div className="bill-alert-actions">
+                        <button
+                          className="btn primary"
+                          disabled={custBusy}
+                          onClick={addCustomerInline}
+                        >
+                          {custBusy
+                            ? "Jod rahe hain…"
+                            : "Jodo aur bill par lagao"}
+                        </button>
+                        <button
+                          className="btn outline"
+                          onClick={() => setShowNewCust(false)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
-          <Problem message={error || preview.e} />
+          <Problem message={friendlyError(error || preview.e)} />
           <button
             disabled={busy || !preview.b}
             className="btn primary full-btn"
