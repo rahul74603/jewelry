@@ -144,6 +144,56 @@ describe("Precise shared billing", () => {
     ]);
     expect(b.taxPaise).toBe(0);
   });
+  it("bills a Silver 925 item from its own rate, and refuses without one", () => {
+    const d = data(),
+      i = input();
+    d.products = [
+      {
+        ...product,
+        id: "s925",
+        name: "Silver anklet pair",
+        category: "Anklets",
+        metal: "Silver",
+        purity: "925",
+        gross: 10,
+        stone: 0,
+        deduction: 0,
+        cost: 900,
+        makingMode: "Fixed",
+        making: 200,
+      },
+    ];
+    d.rates = [
+      {
+        id: "rs925",
+        metal: "Silver",
+        purity: "925",
+        rate: 160,
+        effectiveAt: "2026-01-01T00:00:00.000Z",
+      },
+    ];
+    i.items = [
+      {
+        productId: "s925",
+        quantity: 1,
+        makingMode: "Fixed",
+        making: 200,
+        wastagePct: 0,
+        stoneValue: 0,
+        otherCharges: 0,
+        discount: 0,
+      },
+    ];
+    const b = calculateInvoice(d, i, date, "silver-925");
+    expect(b.lines[0].net).toBe(10);
+    expect(b.lines[0].metalPaise).toBe(160000);
+    expect(b.lines[0].totalPaise).toBe(180000);
+    expect(b.totalPaise).toBe(180000);
+    d.rates = [];
+    expect(() => calculateInvoice(d, i, date, "silver-925")).toThrow(
+      "Add an effective rate for Silver 925.",
+    );
+  });
   it("rounds money half-up, applies quantity, wastage and discount before tax", () => {
     expect(paise("0.005")).toBe(1);
     const i = input();

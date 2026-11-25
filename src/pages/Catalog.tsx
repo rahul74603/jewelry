@@ -35,6 +35,12 @@ import {
   saleInvoices,
   paymentStatus,
 } from "../../functions/src/core/billing";
+import {
+  METALS,
+  OTHER_OPTION,
+  PRODUCT_CATEGORIES,
+  puritiesFor,
+} from "../lib/catalog";
 import { useShop, useToast } from "../lib/store";
 import {
   cash,
@@ -65,13 +71,19 @@ function validation(errors: Record<string, any>) {
 function ProductForm({ close }: { close: () => void }) {
   const { data, perform } = useShop(),
     notify = useToast(),
-    [error, E] = useState("");
+    [error, E] = useState(""),
+    // Text typed when "Other" is picked in a dropdown.
+    [catOther, setCatOther] = useState(""),
+    [metalOther, setMetalOther] = useState(""),
+    [purityOther, setPurityOther] = useState("");
   const sample =
     currentRates(data.rates).find((r) => r.metal === "Gold") ??
     currentRates(data.rates)[0];
   const {
     register,
     handleSubmit,
+    watch,
+    setValue,
     formState: { errors, isSubmitting, isDirty },
   } = useForm<Product>({
     resolver: zodResolver(productSchema),
@@ -93,12 +105,40 @@ function ProductForm({ close }: { close: () => void }) {
       huid: "",
     },
   });
+  const metalVal = watch("metal"),
+    categoryVal = watch("category"),
+    purityVal = watch("purity");
+  // Purity options follow the chosen metal; a custom metal has no list,
+  // so purity becomes a free text field in that case.
+  const purityOptions =
+    metalVal === OTHER_OPTION ? [] : puritiesFor(metalVal);
   return (
     <form
       data-unsaved={isDirty}
       data-saving={isSubmitting}
       onSubmit={handleSubmit(async (v) => {
         try {
+          if (v.category === OTHER_OPTION) {
+            if (!catOther.trim()) {
+              E("Type the custom category.");
+              return;
+            }
+            v.category = catOther.trim();
+          }
+          if (v.metal === OTHER_OPTION) {
+            if (!metalOther.trim()) {
+              E("Type the custom metal.");
+              return;
+            }
+            v.metal = metalOther.trim();
+          }
+          if (v.purity === OTHER_OPTION) {
+            if (!purityOther.trim()) {
+              E("Type the custom purity.");
+              return;
+            }
+            v.purity = purityOther.trim();
+          }
           await perform("product", v);
           notify("Product added to inventory.");
           markSaved(document.querySelector("[role=dialog]"));
@@ -113,16 +153,80 @@ function ProductForm({ close }: { close: () => void }) {
           [
             ["name", "Product name"],
             ["sku", "SKU / barcode"],
-            ["category", "Category"],
-            ["metal", "Metal"],
-            ["purity", "Purity"],
-            ["huid", "HUID (if applicable)"],
           ] as const
         ).map(([k, t]) => (
           <Field key={k} label={t}>
             <input {...register(k)} />
           </Field>
         ))}
+        <Field label="Category">
+          <Select {...register("category")}>
+            {PRODUCT_CATEGORIES.map((c) => (
+              <option key={c}>{c}</option>
+            ))}
+            <option>{OTHER_OPTION}</option>
+          </Select>
+        </Field>
+        {categoryVal === OTHER_OPTION && (
+          <Field label="Custom category">
+            <input
+              value={catOther}
+              onChange={(e) => setCatOther(e.target.value)}
+              placeholder="e.g. Kamarbandh"
+            />
+          </Field>
+        )}
+        <Field label="Metal">
+          <Select
+            {...register("metal", {
+              onChange: (e) => {
+                const m = e.target.value;
+                if (m !== OTHER_OPTION)
+                  setValue("purity", puritiesFor(m)[0] ?? OTHER_OPTION);
+              },
+            })}
+          >
+            {METALS.map((m) => (
+              <option key={m}>{m}</option>
+            ))}
+            <option>{OTHER_OPTION}</option>
+          </Select>
+        </Field>
+        {metalVal === OTHER_OPTION && (
+          <Field label="Custom metal">
+            <input
+              value={metalOther}
+              onChange={(e) => setMetalOther(e.target.value)}
+              placeholder="e.g. Copper"
+            />
+          </Field>
+        )}
+        {purityOptions.length ? (
+          <Field label="Purity">
+            <Select {...register("purity")}>
+              {purityOptions.map((p) => (
+                <option key={p}>{p}</option>
+              ))}
+              <option>{OTHER_OPTION}</option>
+            </Select>
+          </Field>
+        ) : (
+          <Field label="Purity">
+            <input {...register("purity")} placeholder="e.g. 22K" />
+          </Field>
+        )}
+        {purityVal === OTHER_OPTION && purityOptions.length > 0 && (
+          <Field label="Custom purity">
+            <input
+              value={purityOther}
+              onChange={(e) => setPurityOther(e.target.value)}
+              placeholder="e.g. 21K"
+            />
+          </Field>
+        )}
+        <Field label="HUID (if applicable)">
+          <input {...register("huid")} />
+        </Field>
         {(
           [
             ["gross", "Gross weight / piece (g)", 0.001],
@@ -599,17 +703,35 @@ export function MetalRates() {
     notify = useToast(),
     [params, P] = useSearchParams(),
     [error, E] = useState(""),
-    [busy, B] = useState(false);
+    [busy, B] = useState(false),
+    // Dropdown state; "Other" reveals a free-text field.
+    [metalSel, setMetalSel] = useState("Gold"),
+    [puritySel, setPuritySel] = useState("22K"),
+    [metalCustom, setMetalCustom] = useState(""),
+    [purityCustom, setPurityCustom] = useState("");
   const rates = currentRates(data.rates);
+  const purityOpts = metalSel === OTHER_OPTION ? [] : puritiesFor(metalSel);
   const add = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     B(true);
     try {
+      const metalRaw = String(f.get("metal"));
+      const metal =
+        metalRaw === OTHER_OPTION
+          ? String(f.get("metalCustom") ?? "").trim()
+          : metalRaw;
+      const purityRaw = String(f.get("purity"));
+      const purity =
+        purityRaw === OTHER_OPTION
+          ? String(f.get("purityCustom") ?? "").trim()
+          : purityRaw;
+      if (!metal) throw Error("Type the custom metal.");
+      if (!purity) throw Error("Type the custom purity.");
       const v = rateSchema.parse({
         id: key(),
-        metal: String(f.get("metal")).trim(),
-        purity: String(f.get("purity")).trim(),
+        metal,
+        purity,
         rate: Number(f.get("rate")),
         effectiveAt: new Date(String(f.get("date"))).toISOString(),
       });
@@ -713,21 +835,68 @@ export function MetalRates() {
         <form onSubmit={add} data-saving={busy}>
           <div className="form-grid">
             <Field label="Metal">
-              <input
+              <Select
                 name="metal"
-                list="metal-names"
-                required
-                defaultValue="Gold"
-              />
-              <datalist id="metal-names">
-                {["Gold", "Silver", "Diamond", "Platinum"].map((v) => (
-                  <option key={v}>{v}</option>
+                value={metalSel}
+                onChange={(e) => {
+                  const m = e.target.value;
+                  setMetalSel(m);
+                  setPuritySel(
+                    m === OTHER_OPTION
+                      ? OTHER_OPTION
+                      : (puritiesFor(m)[0] ?? OTHER_OPTION),
+                  );
+                }}
+              >
+                {METALS.map((m) => (
+                  <option key={m}>{m}</option>
                 ))}
-              </datalist>
+                <option>{OTHER_OPTION}</option>
+              </Select>
             </Field>
-            <Field label="Purity">
-              <input name="purity" required defaultValue="22K" />
-            </Field>
+            {metalSel === OTHER_OPTION && (
+              <Field label="Custom metal">
+                <input
+                  name="metalCustom"
+                  value={metalCustom}
+                  onChange={(e) => setMetalCustom(e.target.value)}
+                  placeholder="e.g. Copper"
+                />
+              </Field>
+            )}
+            {purityOpts.length ? (
+              <Field label="Purity">
+                <Select
+                  name="purity"
+                  value={puritySel}
+                  onChange={(e) => setPuritySel(e.target.value)}
+                >
+                  {purityOpts.map((p) => (
+                    <option key={p}>{p}</option>
+                  ))}
+                  <option>{OTHER_OPTION}</option>
+                </Select>
+              </Field>
+            ) : (
+              <Field label="Purity">
+                <input
+                  name="purity"
+                  value={purityCustom}
+                  onChange={(e) => setPurityCustom(e.target.value)}
+                  placeholder="e.g. 22K"
+                />
+              </Field>
+            )}
+            {puritySel === OTHER_OPTION && purityOpts.length > 0 && (
+              <Field label="Custom purity">
+                <input
+                  name="purityCustom"
+                  value={purityCustom}
+                  onChange={(e) => setPurityCustom(e.target.value)}
+                  placeholder="e.g. 21K"
+                />
+              </Field>
+            )}
             <Field label="Rate per gram (₹)">
               <input
                 type="number"
