@@ -15,7 +15,6 @@ import {
   Users,
   ChartNoAxesCombined,
   Settings2,
-  Layers3,
   Store,
   ChevronsUpDown,
   ChevronRight,
@@ -54,7 +53,7 @@ import {
 } from "../../functions/src/core/loans";
 import Dashboard from "../pages/Dashboard";
 import { Invoices, InvoiceEditor, InvoiceDetail } from "../pages/Billing";
-import { Inventory, Customers, MetalRates } from "../pages/Catalog";
+import { Inventory, Customers } from "../pages/Catalog";
 import { Reports, Settings } from "../pages/Management";
 import { Loans } from "../pages/Loans";
 const links = [
@@ -73,7 +72,6 @@ const links = [
     hi: "गिरवी और EMI",
     icon: HandCoins,
   },
-  { path: "/rates", name: "Metal rates", hi: "धातु के भाव", icon: Layers3 },
   {
     path: "/reports",
     name: "Reports",
@@ -333,7 +331,6 @@ export function Shell() {
               <Route path="/inventory" element={<Inventory />} />
               <Route path="/customers" element={<Customers />} />
               <Route path="/loans" element={<Loans />} />
-              <Route path="/rates" element={<MetalRates />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/settings" element={<Settings />} />
               <Route
@@ -509,13 +506,13 @@ export function Shell() {
               [
                 "02",
                 "Prepare your inventory",
-                "Add a product and record an effective metal rate for its purity.",
+                "Add products to your stock. Rates are typed on the bill itself — there is no separate rates page.",
                 "/inventory",
               ],
               [
                 "03",
                 "Create your first invoice",
-                "Select a customer and items. Check the total and payment before finalizing.",
+                "Customer, items, rate and payment — everything happens on one bill screen.",
                 "/billing/new",
               ],
               [

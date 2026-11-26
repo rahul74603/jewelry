@@ -24,7 +24,6 @@ import {
   RotateCcw,
   FilePenLine,
   IndianRupee,
-  UserPlus,
 } from "lucide-react";
 import {
   draftSchema,
@@ -37,6 +36,7 @@ import {
   type InvoiceInput,
   type LineInput,
   type Product,
+  type Customer,
 } from "../../functions/src/core/model";
 import {
   calculateInvoice,
@@ -56,6 +56,21 @@ import {
 } from "../../functions/src/core/documents";
 import { markSaved } from "../lib/navigation";
 import { useShop, useToast } from "../lib/store";
+import { newLine } from "../lib/demo";
+import {
+  METALS,
+  OTHER_OPTION,
+  PRODUCT_CATEGORIES,
+  puritiesFor,
+  typesFor,
+} from "../lib/catalog";
+import {
+  buildQuickProduct,
+  findCustomerByPhone,
+  prefillRate,
+  rateUpsertFor,
+  resolveBillCustomer,
+} from "../lib/billFlow";
 import { rupee, day, key, err, cash } from "../lib/format";
 import {
   printDocument,
@@ -272,14 +287,79 @@ export function InvoiceEditor() {
   const [review, setReview] = useState<FinalizeInput | null>(null),
     [error, E] = useState(""),
     [busy, B] = useState(false),
-    [modal, M] = useState(""),
     [query, Q] = useState(""),
-    [expand, X] = useState(-1),
-    // Inline "Naya customer jodo" mini-form (udhar box).
-    [showNewCust, setShowNewCust] = useState(false),
-    [newCustName, setNewCustName] = useState(""),
-    [newCustPhone, setNewCustPhone] = useState(""),
-    [custBusy, setCustBusy] = useState(false);
+    [expand, X] = useState(-1);
+  // 01 Customer — typed right on the bill. Drafts / duplicates /
+  // converted estimates reopen with their customer already filled in.
+  const [custName, setCustName] = useState(
+    () =>
+      data.customers.find((c) => c.id === invoice.customerId)?.name ?? "",
+  );
+  const [custPhone, setCustPhone] = useState(
+    () =>
+      data.customers.find((c) => c.id === invoice.customerId)?.phone ?? "",
+  );
+  const [custAddress, setCustAddress] = useState(
+    () =>
+      data.customers.find((c) => c.id === invoice.customerId)?.address ?? "",
+  );
+  // The customer the typed mobile matched (if any) — their name and
+  // address fill in by themselves, and the bill links to them.
+  const matchedCustomer = invoice.customerId
+    ? data.customers.find((c) => c.id === invoice.customerId)
+    : undefined;
+  // 02 Quick-add — a new piece typed straight on the bill: category,
+  // sub-type, metal, purity, rate and lagat, all in one compact form.
+  // "Other" in a dropdown reveals a free-text field for that value.
+  const [qaCategory, setQaCategory] = useState("Rings");
+  const [qaType, setQaType] = useState("Band");
+  const [qaTypeOther, setQaTypeOther] = useState("");
+  const [qaCatOther, setQaCatOther] = useState("");
+  const [qaMetal, setQaMetal] = useState("Gold");
+  const [qaMetalOther, setQaMetalOther] = useState("");
+  const [qaPurity, setQaPurity] = useState("22K");
+  const [qaPurityOther, setQaPurityOther] = useState("");
+  const [qaRate, setQaRate] = useState(
+    () => String(prefillRate(data.rates, "Gold", "22K") ?? ""),
+  );
+  const [qaWeight, setQaWeight] = useState("");
+  const [qaLagat, setQaLagat] = useState("");
+  const [qaMaking, setQaMaking] = useState("");
+  const [qaBusy, setQaBusy] = useState(false);
+  // Rate typed in place to fix a missing-rate warning, keyed by
+  // "Metal Purity" (e.g. "Gold 22K").
+  const [fixRates, setFixRates] = useState<Record<string, string>>({});
+  const [fixBusy, setFixBusy] = useState("");
+  const qaTypeOptions =
+    qaCategory === OTHER_OPTION ? [] : typesFor(qaCategory);
+  const qaPurityOptions =
+    qaMetal === OTHER_OPTION ? [] : puritiesFor(qaMetal);
+  // A mobile that matches a customer fills their name and address and
+  // links the bill to them; a mobile that matches nobody unlinks the
+  // bill, so saving creates a fresh customer from the typed fields.
+  const onCustPhone = (v: string) => {
+    setCustPhone(v);
+    const match = findCustomerByPhone(data.customers, v);
+    if (match) {
+      setCustName(match.name);
+      setCustAddress(match.address);
+      if (invoice.customerId !== match.id) change("customerId", match.id);
+    } else if (invoice.customerId) {
+      change("customerId", "");
+    }
+  };
+  // Metal / purity change: purity follows the metal, and the rate
+  // field pre-fills with the current rate for that metal + purity.
+  const onQaMetal = (m: string) => {
+    setQaMetal(m);
+    const p = m === OTHER_OPTION ? "" : (puritiesFor(m)[0] ?? "");
+    setQaPurity(p);
+    setQaRate(p ? String(prefillRate(data.rates, m, p) ?? "") : "");
+  };
+  const onQaPurity = (p: string) => {
+    setQaPurity(p);
+    setQaRate(String(prefillRate(data.rates, qaMetal, p) ?? ""));
+  };
   const change = <K extends keyof InvoiceInput>(k: K, v: InvoiceInput[K]) => {
     E("");
     I((s) => ({ ...s, [k]: v }));
@@ -296,19 +376,47 @@ export function InvoiceEditor() {
     invoice.type === "GST invoice" && invoice.gstPercent === undefined
       ? { ...invoice, gstPercent: defaultGstPercent(data.profile) }
       : invoice;
+  // Preview for an advance whose customer is typed above but not yet
+  // saved: the calc needs a customer record to exist, so preview
+  // against a stand-in with the typed details. Finalize and drafts
+  // always use the real resolved customer (see resolveCustomer), so
+  // this stand-in never reaches a saved bill.
+  const previewCustomerId =
+    invoice.customerId || (custName.trim() ? "preview-customer" : "");
+  const previewData = useMemo(
+    () =>
+      invoice.customerId || !custName.trim()
+        ? data
+        : {
+            ...data,
+            customers: [
+              ...data.customers,
+              {
+                id: "preview-customer",
+                name: custName.trim(),
+                phone: custPhone.trim(),
+                email: "",
+                address: custAddress.trim(),
+                gstin: "",
+              },
+            ],
+          },
+    [data, invoice.customerId, custName, custPhone, custAddress],
+  );
   const preview = useMemo(() => {
     if (
       advance
-        ? !invoice.paid || !invoice.advanceFor || !invoice.customerId
+        ? !invoice.paid || !invoice.advanceFor || !previewCustomerId
         : !invoice.items.length
     )
       return { b: null, e: "" };
     try {
       return {
         b: calculateInvoice(
-          data,
+          previewData,
           {
             ...effectiveInvoice,
+            customerId: previewCustomerId,
             paid: advance ? invoice.paid : 0,
             mode: "Cash",
             tenders: undefined,
@@ -324,7 +432,7 @@ export function InvoiceEditor() {
     } catch (e) {
       return { b: null, e: err(e) };
     }
-  }, [data, invoice, advance]);
+  }, [previewData, invoice, advance, previewCustomerId]);
   const total = preview.b?.totalPaise ?? 0,
     settlement = paymentSelection(invoice, total);
   // Rates missing for a product on this bill — the calc throws and the
@@ -348,54 +456,26 @@ export function InvoiceEditor() {
     return missing;
   }, [data.rates, data.products, invoice.items]);
   // Udhar (partial payment) without a customer cannot finalize — the
-  // balance has to go to somebody's khata. Show that plainly, in
-  // Hindi, with the balance, before the shopkeeper presses Finalize.
+  // balance has to go to somebody's khata. A name typed in section 01
+  // counts: saving creates that customer, so the warning only shows
+  // when no customer info is there at all.
   const balancePaise = total - paise(invoice.paid);
+  const customerReady = !!invoice.customerId || custName.trim() !== "";
   const needsCustomer =
     invoice.type !== "Estimate" &&
     !advance &&
-    !invoice.customerId &&
+    !customerReady &&
     total > 0 &&
     paise(invoice.paid) < total;
   // The calc's two confusing English prompts, in plain Hindi.
   const friendlyError = (msg: string) => {
     if (!msg) return msg;
     if (msg === "Select a customer for a credit or partial payment.")
-      return "Udhar baki hai — pehle customer ka naam chuno.";
+      return "Udhar baki hai — upar 01 Customer me naam likho.";
     const rate = msg.match(/^Add an effective rate for (.+)\.$/);
     if (rate)
       return `${rate[1]} ka rate dala nahi hai — bina rate ke bill nahi banega.`;
     return msg;
-  };
-  // Create the customer and put them straight on this bill, so the
-  // shopkeeper never has to leave the bill screen.
-  const addCustomerInline = async () => {
-    const name = newCustName.trim();
-    if (!name) {
-      E("Customer ka naam likho.");
-      return;
-    }
-    setCustBusy(true);
-    try {
-      const id = key();
-      await perform("customer", {
-        id,
-        name,
-        phone: newCustPhone.trim(),
-        email: "",
-        address: "",
-        gstin: "",
-      });
-      change("customerId", id);
-      setNewCustName("");
-      setNewCustPhone("");
-      setShowNewCust(false);
-      notify("Customer jod diya — udhar iske khaate me jayega.");
-    } catch (e) {
-      E(err(e));
-    } finally {
-      setCustBusy(false);
-    }
   };
   const setPayment = (
     paid: number,
@@ -431,21 +511,50 @@ export function InvoiceEditor() {
         settlement: paymentSelection({ paid }, total),
       };
     });
-  const paymentInput = () => {
+  // Turn the customer fields typed in section 01 into a linked
+  // customer before anything is saved: a matching mobile reuses the
+  // old record, a typed name creates a new one, blank stays walk-in.
+  // Returns the id to save with, plus the new record (if any) so the
+  // bill can be calculated against data that already has it — the
+  // screen's `data` only refreshes after the next render.
+  const resolveCustomer = async (): Promise<{
+    customerId: string;
+    extra?: Customer;
+  }> => {
+    if (invoice.customerId) return { customerId: invoice.customerId };
+    const res = resolveBillCustomer(
+      data.customers,
+      { name: custName, phone: custPhone, address: custAddress },
+      { required: needsCustomer || advance },
+    );
+    if ("error" in res) throw Error(res.error);
+    if (res.create) {
+      await perform("customer", res.create);
+      I((s) => ({ ...s, customerId: res.customerId }));
+      notify("Customer save ho gaya.");
+      return { customerId: res.customerId, extra: res.create };
+    }
+    return { customerId: res.customerId };
+  };
+  const paymentInput = (customerId?: string) => {
     const input = draftSchema.parse({
       ...effectiveInvoice,
+      ...(customerId !== undefined ? { customerId } : {}),
       settlement,
       ...(advance ? { settlement: "full" } : {}),
     });
     allocations(input);
     return input;
   };
-  const reviewPayment = () => {
+  const reviewPayment = (customerId?: string, extraCustomer?: Customer) => {
     E("");
     try {
-      const input = paymentInput();
+      const input = paymentInput(customerId);
+      const d = extraCustomer
+        ? { ...data, customers: [...data.customers, extraCustomer] }
+        : data;
       const b = calculateInvoice(
-        data,
+        d,
         input,
         new Date().toISOString(),
         "Preview",
@@ -462,6 +571,41 @@ export function InvoiceEditor() {
       setReview(finalizeSchema.parse({ ...input, confirmation }));
     } catch (e) {
       E(err(e));
+    }
+  };
+  // Finalize: resolve the customer first, then review the payment.
+  const finalizeFlow = async () => {
+    if (busy) return;
+    B(true);
+    E("");
+    try {
+      const { customerId, extra } = await resolveCustomer();
+      if (advance && !customerId)
+        throw Error("Advance ke liye upar 01 Customer me naam likho.");
+      reviewPayment(customerId, extra);
+    } catch (e) {
+      E(err(e));
+    } finally {
+      B(false);
+    }
+  };
+  // Save draft: same customer resolution, then the draft as usual.
+  const draftFlow = async () => {
+    if (busy) return;
+    B(true);
+    E("");
+    try {
+      const { customerId } = await resolveCustomer();
+      if (advance && !customerId)
+        throw Error("Advance ke liye upar 01 Customer me naam likho.");
+      await perform("draft", paymentInput(customerId));
+      notify("Draft saved.");
+      markSaved(document);
+      nav("/billing", { replace: true });
+    } catch (e) {
+      E(err(e));
+    } finally {
+      B(false);
     }
   };
   const add = (p: Product) => {
@@ -481,28 +625,128 @@ export function InvoiceEditor() {
           otherCharges: 0,
         },
       ]);
-    M("");
     Q("");
   };
-  const save = async (draft: boolean) => {
+  // Add a brand-new piece straight from the bill: the form's rate
+  // becomes the current rate for that metal + purity, the lagat
+  // becomes the piece's cost, and the piece goes on the bill at once.
+  const quickAdd = async () => {
+    if (qaBusy) return;
+    const category =
+      qaCategory === OTHER_OPTION ? qaCatOther.trim() : qaCategory;
+    const type =
+      qaTypeOptions.length > 0
+        ? qaType === OTHER_OPTION
+          ? qaTypeOther.trim()
+          : qaType
+        : qaTypeOther.trim();
+    const metal = qaMetal === OTHER_OPTION ? qaMetalOther.trim() : qaMetal;
+    const purity =
+      qaPurityOptions.length > 0
+        ? qaPurity === OTHER_OPTION
+          ? qaPurityOther.trim()
+          : qaPurity
+        : qaPurityOther.trim();
+    const weight = Number(qaWeight),
+      rate = Number(qaRate),
+      lagat = Number(qaLagat || 0),
+      making = Number(qaMaking || 0);
+    if (!category) {
+      E("Category chuno ya likho.");
+      return;
+    }
+    if (!type) {
+      E("Item ka type chuno ya likho.");
+      return;
+    }
+    if (!metal) {
+      E("Metal chuno ya likho.");
+      return;
+    }
+    if (!purity) {
+      E("Purity chuno ya likho.");
+      return;
+    }
+    if (!(weight > 0)) {
+      E("Vazan (gram) likho.");
+      return;
+    }
+    if (!(rate > 0)) {
+      E("Rate per gram likho.");
+      return;
+    }
+    if (lagat < 0 || making < 0) {
+      E("Lagat aur making 0 ya usse zyada honi chahiye.");
+      return;
+    }
+    setQaBusy(true);
+    E("");
+    try {
+      const product = buildQuickProduct({
+        category,
+        type,
+        metal,
+        purity,
+        rate,
+        weight,
+        lagat,
+        making,
+      });
+      await perform("product", product);
+      const rateRec = rateUpsertFor(data.rates, metal, purity, rate);
+      if (rateRec) await perform("rate", rateRec);
+      I((s) => ({ ...s, items: [...s.items, newLine(product)] }));
+      setQaWeight("");
+      setQaLagat("");
+      setQaMaking("");
+      notify("Item bill me jud gaya.");
+    } catch (e) {
+      E(err(e));
+    } finally {
+      setQaBusy(false);
+    }
+  };
+  // Fix a missing rate right inside its warning: the typed rate is
+  // recorded at once, and the bill's amount appears immediately.
+  const fixRate = async (metal: string, purity: string) => {
+    const k = metal + " " + purity;
+    const rate = Number(fixRates[k] ?? "");
+    if (!(rate > 0)) {
+      E(`${metal} ${purity} ka rate likho.`);
+      return;
+    }
+    setFixBusy(k);
+    try {
+      const rec = rateUpsertFor(data.rates, metal, purity, rate);
+      if (rec) await perform("rate", rec);
+      setFixRates((s) => {
+        const n = { ...s };
+        delete n[k];
+        return n;
+      });
+      notify("Rate save ho gaya — bill ka amount aa gaya.");
+    } catch (e) {
+      E(err(e));
+    } finally {
+      setFixBusy("");
+    }
+  };
+  const saveFinal = async () => {
     if (busy) return;
     B(true);
     E("");
     try {
-      const payload = draft ? paymentInput() : review;
-      if (!payload) throw Error("Review the payment before finalizing.");
-      await perform(draft ? "draft" : "invoice", payload);
+      if (!review) throw Error("Review the payment before finalizing.");
+      await perform("invoice", review);
       notify(
-        draft
-          ? "Draft saved."
-          : invoice.type === "Estimate"
-            ? "Estimate saved."
-            : advance
-              ? "Advance recorded on customer account."
-              : "Invoice finalized and stock posted.",
+        invoice.type === "Estimate"
+          ? "Estimate saved."
+          : advance
+            ? "Advance recorded on customer account."
+            : "Invoice finalized and stock posted.",
       );
       markSaved(document);
-      nav(draft ? "/billing" : "/billing/" + invoice.id, { replace: true });
+      nav("/billing/" + invoice.id, { replace: true });
     } catch (e) {
       E(err(e));
       setReview(null);
@@ -525,7 +769,7 @@ export function InvoiceEditor() {
               ? "New estimate"
               : "New invoice"
         }
-        subtitle="Build an itemised bill with your shop’s current metal rates."
+        subtitle="Customer, item, rate aur payment — sab kuch ek hi screen par."
       />
       <div
         className="editor-grid"
@@ -535,10 +779,37 @@ export function InvoiceEditor() {
         <div className="stack">
           <section className="panel form-panel">
             <h2>
-              <span className="step-index">01</span>Bill details
+              <span className="step-index">01</span>Customer
             </h2>
             <div className="form-grid">
-              <Field label="Document type">
+              <Field label="Customer ka naam">
+                <input
+                  value={custName}
+                  onChange={(e) => setCustName(e.target.value)}
+                  placeholder="e.g. Ramesh Kumar"
+                />
+              </Field>
+              <Field label="Mobile number">
+                <input
+                  value={custPhone}
+                  onChange={(e) => onCustPhone(e.target.value)}
+                  placeholder="e.g. 98765 43210"
+                  inputMode="tel"
+                />
+              </Field>
+              <Field label="Address" full>
+                <input
+                  value={custAddress}
+                  onChange={(e) => setCustAddress(e.target.value)}
+                  placeholder="Gaon / mohalla, sheher"
+                />
+              </Field>
+              {matchedCustomer && (
+                <p className="muted">
+                  Purana grahak mil gaya — naam aur address bhar gaya hai.
+                </p>
+              )}
+              <Field label="Bill ka type">
                 <Select
                   value={invoice.type}
                   onChange={(e) => {
@@ -615,19 +886,6 @@ export function InvoiceEditor() {
                   </Select>
                 </Field>
               )}
-              <Field label="Customer">
-                <Select
-                  value={invoice.customerId}
-                  onChange={(e) => change("customerId", e.target.value)}
-                >
-                  <option value="">Walk-in customer</option>
-                  {data.customers.map((c) => (
-                    <option value={c.id} key={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
             </div>
           </section>
           {advance ? (
@@ -648,15 +906,61 @@ export function InvoiceEditor() {
             <section className="panel form-panel">
               <div className="row-between">
                 <h2>
-                  <span className="step-index">02</span>Jewellery items
+                  <span className="step-index">02</span>Item jodo
                 </h2>
                 <span className="count-pill">{invoice.items.length} items</span>
               </div>
+              <label className="search-input full-search">
+                <Search size={16} />
+                <input
+                  placeholder="Stock me khojo — naam ya SKU…"
+                  value={query}
+                  onChange={(e) => Q(e.target.value)}
+                />
+              </label>
+              {query.trim() !== "" && (
+                <div className="pick-list">
+                  {data.products
+                    .filter((p) =>
+                      (p.name + p.sku)
+                        .toLowerCase()
+                        .includes(query.toLowerCase()),
+                    )
+                    .slice(0, 6)
+                    .map((p) => (
+                      <button
+                        key={p.id}
+                        disabled={!p.stock && invoice.type !== "Estimate"}
+                        onClick={() => add(p)}
+                      >
+                        <span className="item-icon">
+                          <Package size={18} />
+                        </span>
+                        <span>
+                          <strong>{p.name}</strong>
+                          <small>
+                            {p.sku} · {p.metal} {p.purity} · {p.stock} pcs
+                          </small>
+                        </span>
+                        <Plus size={15} />
+                      </button>
+                    ))}
+                  {!data.products.some((p) =>
+                    (p.name + p.sku)
+                      .toLowerCase()
+                      .includes(query.toLowerCase()),
+                  ) && (
+                    <p className="muted">
+                      Stock me nahi mila — neeche naya item bharo.
+                    </p>
+                  )}
+                </div>
+              )}
               {!invoice.items.length ? (
                 <div className="item-placeholder">
                   <ReceiptText size={25} />
                   <strong>Add your first item</strong>
-                  <p>Choose a product from your inventory.</p>
+                  <p>Upar stock me khojo, ya neeche naya item bharo.</p>
                 </div>
               ) : (
                 invoice.items.map((l, n) => {
@@ -777,21 +1081,195 @@ export function InvoiceEditor() {
                       bill nahi banega.
                     </strong>
                     <p>
-                      Pehle is metal ka aaj ka rate dalo, phir bill ka
-                      amount aayega.
+                      Yahin rate likho — kisi aur page par jaane ki jarurat
+                      nahi hai.
                     </p>
                   </div>
-                  <Link className="btn primary" to="/rates">
-                    Rate dalo
-                  </Link>
+                  <div className="form-grid">
+                    <Field label={`${metal} ${purity} — Rate per gram (₹)`}>
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        placeholder="e.g. 11440"
+                        value={fixRates[metal + " " + purity] ?? ""}
+                        onChange={(e) =>
+                          setFixRates((s) => ({
+                            ...s,
+                            [metal + " " + purity]: e.target.value,
+                          }))
+                        }
+                      />
+                    </Field>
+                  </div>
+                  <div className="bill-alert-actions">
+                    <button
+                      className="btn primary"
+                      disabled={fixBusy === metal + " " + purity}
+                      onClick={() => fixRate(metal, purity)}
+                    >
+                      {fixBusy === metal + " " + purity
+                        ? "Save ho raha hai…"
+                        : "Rate save karo"}
+                    </button>
+                  </div>
                 </div>
               ))}
+              <h3 className="spaced">Naya item — seedha bill par bharo</h3>
+              <div className="form-grid">
+                <Field label="Category">
+                  <Select
+                    value={qaCategory}
+                    onChange={(e) => {
+                      const c = e.target.value;
+                      setQaCategory(c);
+                      setQaType(
+                        c === OTHER_OPTION
+                          ? ""
+                          : (typesFor(c)[0] ?? ""),
+                      );
+                    }}
+                  >
+                    {PRODUCT_CATEGORIES.map((c) => (
+                      <option key={c}>{c}</option>
+                    ))}
+                    <option>{OTHER_OPTION}</option>
+                  </Select>
+                </Field>
+                {qaCategory === OTHER_OPTION && (
+                  <Field label="Custom category">
+                    <input
+                      value={qaCatOther}
+                      onChange={(e) => setQaCatOther(e.target.value)}
+                      placeholder="e.g. Kamarbandh"
+                    />
+                  </Field>
+                )}
+                {qaTypeOptions.length > 0 ? (
+                  <Field label="Type">
+                    <Select
+                      value={qaType}
+                      onChange={(e) => setQaType(e.target.value)}
+                    >
+                      {qaTypeOptions.map((t) => (
+                        <option key={t}>{t}</option>
+                      ))}
+                      <option>{OTHER_OPTION}</option>
+                    </Select>
+                  </Field>
+                ) : (
+                  <Field label="Type">
+                    <input
+                      value={qaTypeOther}
+                      onChange={(e) => setQaTypeOther(e.target.value)}
+                      placeholder="e.g. Kamarbandh"
+                    />
+                  </Field>
+                )}
+                {qaType === OTHER_OPTION && qaTypeOptions.length > 0 && (
+                  <Field label="Custom type">
+                    <input
+                      value={qaTypeOther}
+                      onChange={(e) => setQaTypeOther(e.target.value)}
+                      placeholder="e.g. Temple"
+                    />
+                  </Field>
+                )}
+                <Field label="Metal">
+                  <Select value={qaMetal} onChange={(e) => onQaMetal(e.target.value)}>
+                    {METALS.map((m) => (
+                      <option key={m}>{m}</option>
+                    ))}
+                    <option>{OTHER_OPTION}</option>
+                  </Select>
+                </Field>
+                {qaMetal === OTHER_OPTION && (
+                  <Field label="Custom metal">
+                    <input
+                      value={qaMetalOther}
+                      onChange={(e) => setQaMetalOther(e.target.value)}
+                      placeholder="e.g. Copper"
+                    />
+                  </Field>
+                )}
+                {qaPurityOptions.length > 0 ? (
+                  <Field label="Purity">
+                    <Select
+                      value={qaPurity}
+                      onChange={(e) => onQaPurity(e.target.value)}
+                    >
+                      {qaPurityOptions.map((p) => (
+                        <option key={p}>{p}</option>
+                      ))}
+                      <option>{OTHER_OPTION}</option>
+                    </Select>
+                  </Field>
+                ) : (
+                  <Field label="Purity">
+                    <input
+                      value={qaPurityOther}
+                      onChange={(e) => setQaPurityOther(e.target.value)}
+                      placeholder="e.g. 22K"
+                    />
+                  </Field>
+                )}
+                {qaPurity === OTHER_OPTION && qaPurityOptions.length > 0 && (
+                  <Field label="Custom purity">
+                    <input
+                      value={qaPurityOther}
+                      onChange={(e) => setQaPurityOther(e.target.value)}
+                      placeholder="e.g. 21K"
+                    />
+                  </Field>
+                )}
+                <Field label="Rate per gram (₹)">
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={qaRate}
+                    onChange={(e) => setQaRate(e.target.value)}
+                    placeholder="e.g. 11440"
+                  />
+                </Field>
+                <Field label="Lagat — khareed bhav (₹)">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={qaLagat}
+                    onChange={(e) => setQaLagat(e.target.value)}
+                    placeholder="e.g. 50000"
+                  />
+                </Field>
+                <Field label="Vazan (gram)">
+                  <input
+                    type="number"
+                    min="0.001"
+                    step="0.001"
+                    value={qaWeight}
+                    onChange={(e) => setQaWeight(e.target.value)}
+                    placeholder="e.g. 5"
+                  />
+                </Field>
+                <Field label="Making (₹)">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={qaMaking}
+                    onChange={(e) => setQaMaking(e.target.value)}
+                    placeholder="e.g. 500"
+                  />
+                </Field>
+              </div>
               <button
                 className="btn outline full-btn"
-                onClick={() => M("items")}
+                disabled={qaBusy}
+                onClick={quickAdd}
               >
                 <Plus size={16} />
-                Add product to bill
+                {qaBusy ? "Jod rahe hain…" : "Item jodo"}
               </button>
             </section>
           )}
@@ -924,66 +1402,21 @@ export function InvoiceEditor() {
                   <div>
                     <strong>
                       {rupee(balancePaise, 2)} udhar baki hai — kisike
-                      khaate me likhna hai, isliye pehle customer ka naam
-                      chuno.
+                      khaate me likhna hai.
                     </strong>
                     <p>
-                      Neeche customer jodo ya Full payment karo — bina
-                      customer ke udhar wala bill finalize nahi hoga.
+                      Upar 01 Customer me naam likho — bina naam ke udhar
+                      wala bill finalize nahi hoga. Ya Full payment karo.
                     </p>
                   </div>
-                  {!showNewCust ? (
-                    <div className="bill-alert-actions">
-                      <button
-                        className="btn outline"
-                        onClick={() => setShowNewCust(true)}
-                      >
-                        <UserPlus size={15} />
-                        Naya customer jodo
-                      </button>
-                      <button
-                        className="btn primary"
-                        onClick={() => setPayment(total / 100, "full")}
-                      >
-                        Full payment karo
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="form-grid">
-                      <Field label="Customer ka naam">
-                        <input
-                          value={newCustName}
-                          onChange={(e) => setNewCustName(e.target.value)}
-                          placeholder="e.g. Ramesh Kumar"
-                        />
-                      </Field>
-                      <Field label="Mobile (optional)">
-                        <input
-                          value={newCustPhone}
-                          onChange={(e) => setNewCustPhone(e.target.value)}
-                          placeholder="e.g. 98765 43210"
-                          inputMode="tel"
-                        />
-                      </Field>
-                      <div className="bill-alert-actions">
-                        <button
-                          className="btn primary"
-                          disabled={custBusy}
-                          onClick={addCustomerInline}
-                        >
-                          {custBusy
-                            ? "Jod rahe hain…"
-                            : "Jodo aur bill par lagao"}
-                        </button>
-                        <button
-                          className="btn outline"
-                          onClick={() => setShowNewCust(false)}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                  <div className="bill-alert-actions">
+                    <button
+                      className="btn primary"
+                      onClick={() => setPayment(total / 100, "full")}
+                    >
+                      Full payment karo
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -992,7 +1425,7 @@ export function InvoiceEditor() {
           <button
             disabled={busy || !preview.b}
             className="btn primary full-btn"
-            onClick={reviewPayment}
+            onClick={finalizeFlow}
           >
             <Check size={16} />
             {invoice.type === "Estimate"
@@ -1004,7 +1437,7 @@ export function InvoiceEditor() {
           <button
             className="btn outline full-btn"
             disabled={busy || (advance ? !invoice.paid : !invoice.items.length)}
-            onClick={() => save(true)}
+            onClick={draftFlow}
           >
             <Save size={15} />
             Save draft
@@ -1016,51 +1449,6 @@ export function InvoiceEditor() {
           </p>
         </aside>
       </div>
-      <Modal
-        open={modal === "items"}
-        title="Choose a product"
-        description="Search your shop’s inventory."
-        onClose={() => M("")}
-      >
-        <label className="search-input full-search">
-          <Search size={16} />
-          <input
-            autoFocus={!window.matchMedia("(pointer: coarse)").matches}
-            placeholder="Search product or SKU…"
-            value={query}
-            onChange={(e) => Q(e.target.value)}
-          />
-        </label>
-        <div className="pick-list">
-          {data.products
-            .filter((p) =>
-              (p.name + p.sku).toLowerCase().includes(query.toLowerCase()),
-            )
-            .map((p) => (
-              <button
-                key={p.id}
-                disabled={!p.stock && invoice.type !== "Estimate"}
-                onClick={() => add(p)}
-              >
-                <span className="item-icon">
-                  <Package size={18} />
-                </span>
-                <span>
-                  <strong>{p.name}</strong>
-                  <small>
-                    {p.sku} · {p.metal} {p.purity} · {p.stock} pcs
-                  </small>
-                </span>
-                <Plus size={15} />
-              </button>
-            ))}
-          {!data.products.length && (
-            <Link to="/inventory?new=1" className="btn primary">
-              Add inventory
-            </Link>
-          )}
-        </div>
-      </Modal>
       <Modal
         open={review !== null}
         onClose={() => setReview(null)}
@@ -1101,7 +1489,7 @@ export function InvoiceEditor() {
           <button
             className="btn primary"
             disabled={busy}
-            onClick={() => save(false)}
+            onClick={saveFinal}
           >
             {busy ? "Saving…" : "Confirm & save"}
           </button>

@@ -5,6 +5,8 @@ import {
   PRODUCT_CATEGORIES,
   PURITY_BY_METAL,
   puritiesFor,
+  CATEGORY_TYPES,
+  typesFor,
 } from "../src/lib/catalog";
 import { demoSampleRecords } from "../src/lib/demo";
 import {
@@ -50,6 +52,20 @@ describe("Catalogue dropdown lists", () => {
 
   it("keeps a manual option for anything not listed", () => {
     expect(OTHER_OPTION).toBe("Other");
+  });
+
+  it("offers a sub-type list for every category (bill screen, step 02)", () => {
+    for (const c of PRODUCT_CATEGORIES) {
+      expect(CATEGORY_TYPES[c], c).toBeDefined();
+      expect(CATEGORY_TYPES[c].length, c).toBeGreaterThan(0);
+      expect(typesFor(c)).toEqual(CATEGORY_TYPES[c]);
+    }
+    expect(typesFor("Rings")).toContain("Band");
+    expect(typesFor("Necklaces")).toContain("Mangalsutra");
+    expect(typesFor("Earrings")).toContain("Jhumka");
+    expect(typesFor("Kardhani")).toContain("Kamarbandh");
+    expect(typesFor("Sets")).toContain("Bridal set");
+    expect(typesFor("Copper")).toEqual([]);
   });
 });
 

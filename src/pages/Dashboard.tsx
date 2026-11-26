@@ -512,8 +512,8 @@ export default function Dashboard() {
               />
             )}
           </div>
-          <Link to="/rates" className="rate-footer">
-            Manage metal rates
+          <Link to="/billing/new" className="rate-footer">
+            Bill banao — rate bill par hi dalo
             <ArrowRight size={14} />
           </Link>
         </section>

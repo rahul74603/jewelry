@@ -1,5 +1,5 @@
 /**
- * Shop catalogue lists used by the Metal rates and Add Product forms.
+ * Shop catalogue lists used by the billing screen and Add Product form.
  *
  * These are suggestion lists, not a closed enum: every dropdown has an
  * "Other" option that lets the shopkeeper type a custom value, and the
@@ -45,3 +45,51 @@ export const PRODUCT_CATEGORIES = [
 
 /** Value used by the "type it yourself" option in the dropdowns. */
 export const OTHER_OPTION = "Other";
+
+/**
+ * Sub-types shown UNDER a category on the bill screen — e.g. picking
+ * Rings offers Band / Solitaire / Cocktail / Eternity. Suggestion
+ * lists, not a closed enum: each dropdown also offers "Other" for a
+ * free-text type, and a category with no list yet shows the free-text
+ * field directly.
+ */
+export const CATEGORY_TYPES: Record<string, string[]> = {
+  Rings: ["Band", "Solitaire", "Cocktail", "Eternity"],
+  Necklaces: ["Chain", "Choker", "Mangalsutra", "Pendant set", "Rani haar"],
+  Earrings: ["Studs", "Jhumka", "Bali", "Chandbali"],
+  Bangles: ["Kada", "Chudi set"],
+  Chains: ["Rope", "Curb", "Figaro"],
+  Pendants: ["Locket", "Solitaire pendant"],
+  Anklets: ["Payal"],
+  Coins: ["Lakshmi", "Ganesha"],
+  Bracelets: ["Tennis", "Kada"],
+  "Nose Rings": ["Nath", "Stud"],
+  Kardhani: ["Kamarbandh"],
+  "Toe Rings": ["Bichhiya"],
+  Brooches: ["Brooch pin"],
+  Sets: ["Bridal set", "Necklace set"],
+};
+
+/** Sub-type options for a category; empty when the category is custom. */
+export function typesFor(category: string): string[] {
+  return CATEGORY_TYPES[category] ?? [];
+}
+
+/** Singular form of a category, for the auto-generated name of a
+ * piece added straight from the bill screen ("Gold 22K Band Ring"). */
+export const CATEGORY_SINGULAR: Record<string, string> = {
+  Rings: "Ring",
+  Necklaces: "Necklace",
+  Earrings: "Earring",
+  Bangles: "Bangle",
+  Chains: "Chain",
+  Pendants: "Pendant",
+  Anklets: "Anklet",
+  Coins: "Coin",
+  Bracelets: "Bracelet",
+  "Nose Rings": "Nose Ring",
+  Kardhani: "Kardhani",
+  "Toe Rings": "Toe Ring",
+  Brooches: "Brooch",
+  Sets: "Set",
+};
