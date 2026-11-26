@@ -14,6 +14,12 @@ import {
   LICENSE_CHECK_INTERVAL_MS,
   maybeCheckLicenseHeartbeat,
 } from "./lib/licenseCheck";
+import {
+  getPrimaryAbi,
+  maybeCheckLatest,
+  type UpdateAvailable,
+} from "./lib/appUpdate";
+import { UpdateBanner } from "./components/UpdateBanner";
 
 /** Build version baked in by CI (VITE_APP_VERSION=1.0.<run number>); "dev" locally. */
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || "dev";
@@ -24,6 +30,40 @@ export default function Demo() {
   // Kill switch: the server-blocked flag persists across launches,
   // so a blocked device shows the lock screen before the shop opens.
   const [blocked, setBlocked] = useState(() => isLicenseBlocked());
+  // One-tap update: a newer allowed version on the server offers a
+  // dismissible banner (every update is optional — no mandatory block).
+  const [update, setUpdate] = useState<UpdateAvailable | null>(null);
+  useEffect(() => {
+    // Once per app open, at most once a day (the once-a-day cache
+    // in appUpdate.ts) — fail-open, so offline or a down server
+    // just means no banner and the shop works normally.
+    let alive = true;
+    const check = async () => {
+      if (!navigator.onLine) return;
+      try {
+        // Same Device ID the heartbeat sends (getDeviceId is cached
+        // per session) — checkLatest normalises it to the 12-hex
+        // wire form itself.
+        const [deviceId, abi] = await Promise.all([
+          getDeviceId(),
+          getPrimaryAbi(),
+        ]);
+        const r = await maybeCheckLatest({
+          deviceId,
+          currentVersion: APP_VERSION,
+          mode: "demo",
+          abi,
+        });
+        if (alive && r.available) setUpdate(r);
+      } catch {
+        // Update check must never break the shop.
+      }
+    };
+    void check();
+    return () => {
+      alive = false;
+    };
+  }, []);
   useEffect(() => {
     let alive = true;
     // Heartbeat: on open, on foreground, and every 5 minutes while
@@ -71,20 +111,27 @@ export default function Demo() {
     };
   }, []);
   if (blocked) return <LicenseBlocked />;
+  // Every update is optional (staged rollout: pushed updates are
+  // never mandatory) — the banner always offers [Baad me].
   return (
-    <Shop.Provider
-      value={{
-        data,
-        demo: true,
-        perform: async (a, p) => {
-          const next = demoMutation(ref.current, a, p);
-          ref.current = next;
-          saveDemoWorkspace(next);
-          setData(next);
-        },
-      }}
-    >
-      <Shell />
-    </Shop.Provider>
+    <>
+      {update && (
+        <UpdateBanner info={update} onDismiss={() => setUpdate(null)} />
+      )}
+      <Shop.Provider
+        value={{
+          data,
+          demo: true,
+          perform: async (a, p) => {
+            const next = demoMutation(ref.current, a, p);
+            ref.current = next;
+            saveDemoWorkspace(next);
+            setData(next);
+          },
+        }}
+      >
+        <Shell />
+      </Shop.Provider>
+    </>
   );
 }

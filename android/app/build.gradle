@@ -12,6 +12,14 @@ def aurumAppIdSuffix = project.findProperty("aurumAppIdSuffix") ?: ""
 def aurumVersionCode = (project.findProperty("aurumVersionCode") ?: "1").toInteger()
 def aurumVersionName = project.findProperty("aurumVersionName") ?: "1.0"
 
+// Release signing (v1.0.45 "Ek click update", per-device design):
+// Gradle builds the release APK UNSIGNED on purpose. Each shop's
+// app is signed afterwards in CI (workflow `sign` job) with that
+// shop's own key from the license server, via apksigner — so an
+// update for shop A cannot install on shop B's phone. There is no
+// signing-config block and no shared keystore anywhere in the repo
+// or in CI secrets.
+
 android {
     namespace "com.aurum.jewellery"
     compileSdk rootProject.ext.compileSdkVersion
@@ -42,6 +50,16 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Same ".preview" suffix as debug: without it the package
+            // would change (com.aurum.jewellery vs
+            // com.aurum.jewellery.preview) and the new APK would install
+            // as a different app instead of updating the old one.
+            // KEEP — the emulator test and every installed preview
+            // expect com.aurum.jewellery.preview
+            // (.master.preview for the master app).
+            applicationIdSuffix ".preview"
+            // No signingConfig here by design: the release APK leaves
+            // Gradle unsigned and CI signs it per device (see above).
         }
     }
     // MediSmart-style ABI splits: one APK per phone ABI, no universal APK.

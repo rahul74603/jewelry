@@ -18,6 +18,6 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     server: { host: "0.0.0.0", allowedHosts: [".e2b.app"] },
     preview: { host: "0.0.0.0", allowedHosts: [".e2b.app"] },
-    test: { include: ["tests/**/*.test.ts"] },
+    test: { include: ["tests/**/*.test.{ts,tsx}"] },
   };
 });

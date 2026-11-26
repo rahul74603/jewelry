@@ -83,6 +83,10 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- One-tap in-app update: installing the downloaded APK needs
+         this, plus the shopkeeper allowing "Install unknown apps"
+         for Aurum once in Settings. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Automatic SMS reminders: sent from the shopkeeper's own SIM. -->
     <uses-permission android:name="android.permission.SEND_SMS" />
     <!-- 10:00 AM exact alarm (Android 12+); the shopkeeper grants it

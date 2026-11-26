@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { lazy, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Link,
   NavLink,
@@ -37,6 +37,8 @@ import {
   HandCoins,
   Clock3,
   Hourglass,
+  KeyRound,
+  Upload,
 } from "lucide-react";
 import { Brand, Icon, Modal, Avatar, Empty } from "./ui";
 import { useShop } from "../lib/store";
@@ -56,6 +58,11 @@ import { Invoices, InvoiceEditor, InvoiceDetail } from "../pages/Billing";
 import { Inventory, Customers } from "../pages/Catalog";
 import { Reports, Settings } from "../pages/Management";
 import { Loans } from "../pages/Loans";
+// Master-only pages, lazy-loaded so the Customer build never loads
+// them: key generation, licenses/kill switch, staged updates.
+const MasterCode = lazy(() => import("./MasterCode"));
+const LicensesDashboard = lazy(() => import("./LicensesDashboard"));
+const UpdatesDashboard = lazy(() => import("./UpdatesDashboard"));
 const links = [
   { path: "/", name: "Dashboard", hi: "डैशबोर्ड", icon: LayoutDashboard },
   {
@@ -85,6 +92,32 @@ const links = [
     icon: Settings2,
   },
 ];
+/**
+ * Master-only sidebar entries (VITE_APP_MODE=master only — the
+ * Customer build never sees them): the developer's key tool, the
+ * licenses/kill-switch dashboard, and the staged update rollout.
+ * Plain Hindi labels, same nav pattern as the shop entries.
+ */
+const masterLinks = [
+  {
+    path: "/master/code",
+    name: "Code banao",
+    hi: "कोड बनाओ",
+    icon: KeyRound,
+  },
+  {
+    path: "/master/licenses",
+    name: "Licenses",
+    hi: "लाइसेंस",
+    icon: ShieldCheck,
+  },
+  {
+    path: "/master/updates",
+    name: "Updates",
+    hi: "अपडेट",
+    icon: Upload,
+  },
+];
 export function Shell() {
   const { data, license, demo, logout } = useShop(),
     [mobile, M] = useState(false),
@@ -93,6 +126,11 @@ export function Shell() {
   const nav = useNavigate(),
     loc = useLocation();
   const { profile: p } = data;
+  // Master mode only: the developer's own entries (key tool,
+  // licenses, updates) join the sidebar. Read at render time so
+  // the Customer build (VITE_APP_MODE=demo) never sees them.
+  const isMaster = import.meta.env.VITE_APP_MODE === "master";
+  const allLinks = isMaster ? [...links, ...masterLinks] : links;
   const hi = p.language === "hi";
   useEffect(() => {
     M(false);
@@ -112,7 +150,7 @@ export function Shell() {
     return () => window.removeEventListener("keydown", f);
   }, []);
   const current =
-    links.find((l) => l.path !== "/" && loc.pathname.startsWith(l.path)) ??
+    allLinks.find((l) => l.path !== "/" && loc.pathname.startsWith(l.path)) ??
     links[0];
   const low = data.products.filter((p) => p.stock < 5);
   // Alerts & reminders (moved here from the top of the Dashboard, Nov
@@ -151,7 +189,7 @@ export function Shell() {
     </NavLink>
   );
   const results = [
-    ...links.map((l) => ({ title: l.name, kind: "Page", path: l.path })),
+    ...allLinks.map((l) => ({ title: l.name, kind: "Page", path: l.path })),
     ...data.products.map((x) => ({
       title: x.name,
       kind: "Product · " + x.sku,
@@ -215,6 +253,12 @@ export function Shell() {
           <h2>MANAGEMENT</h2>
           {links.slice(4).map(navItem)}
         </div>
+        {isMaster && (
+          <div className="nav-group">
+            <h2>MASTER</h2>
+            {masterLinks.map(navItem)}
+          </div>
+        )}
         {(backupDue || due.length > 0) && (
           <div className="nav-group">
             <h2>ALERTS &amp; REMINDERS</h2>
@@ -333,6 +377,19 @@ export function Shell() {
               <Route path="/loans" element={<Loans />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/settings" element={<Settings />} />
+              {isMaster && (
+                <>
+                  <Route path="/master/code" element={<MasterCode />} />
+                  <Route
+                    path="/master/licenses"
+                    element={<LicensesDashboard />}
+                  />
+                  <Route
+                    path="/master/updates"
+                    element={<UpdatesDashboard />}
+                  />
+                </>
+              )}
               <Route
                 path="*"
                 element={

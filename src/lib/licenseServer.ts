@@ -178,3 +178,61 @@ export async function removeLicense(deviceId: string): Promise<void> {
     admin: true,
   });
 }
+
+/**
+ * Per-device update record (Ajay's rollout control, 2026-11-26):
+ * one record per device, holding the latest version registered
+ * for it, the APK URLs for both apps/ABIs, whether Ajay has
+ * allowed the rollout for this device (default false — no update
+ * goes out until he says so), and whether the update is
+ * mandatory. updatedAt is a unix-ms timestamp.
+ */
+export type UpdateRecord = {
+  deviceId: string;
+  version: string;
+  customerArm64Url: string;
+  customerArmeabiUrl: string;
+  masterArm64Url: string;
+  allowed: boolean;
+  mandatory: boolean;
+  updatedAt: number;
+};
+
+/** All per-device update records (admin). */
+export async function listUpdates(): Promise<UpdateRecord[]> {
+  const data = await requestJson("/admin/updates", {
+    method: "GET",
+    admin: true,
+  });
+  const rows = (data as { updates?: unknown } | null)?.updates;
+  if (!Array.isArray(rows))
+    throw Error("License server returned an unexpected response.");
+  return rows as UpdateRecord[];
+}
+
+/**
+ * Push one staged version to ALL shops (admin): POST
+ * /admin/releases/:version/push — flips allowed=1 on every
+ * record for that version. Ajay's one-click rollout: the new
+ * version first lives only on his own test phone (the server
+ * shows staged versions to the test device only), and when he
+ * is satisfied he taps "Sabko update bhejo" in the Master app.
+ * Returns {version, pushedTo} (pushedTo = number of devices).
+ */
+export async function pushRelease(
+  version: string,
+): Promise<{ version: string; pushedTo: number }> {
+  const data = await requestJson(
+    `/admin/releases/${encodeURIComponent(version.trim())}/push`,
+    {
+      method: "POST",
+      admin: true,
+    },
+  );
+  const row = (data as { version?: unknown; pushedTo?: unknown } | null) ?? null;
+  return {
+    version:
+      typeof row?.version === "string" ? row.version : version.trim(),
+    pushedTo: Number(row?.pushedTo) || 0,
+  };
+}
