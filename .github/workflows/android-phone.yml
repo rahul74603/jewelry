@@ -1,5 +1,21 @@
 name: Android phone preview
 
+# Per-device signing + staged rollout (v1.0.45, Ajay 2026-11-26):
+#  - apk/master jobs build UNSIGNED release APKs (no signing config in
+#    build.gradle, no keystore in CI secrets). Unsigned APKs are NEVER
+#    published as release assets.
+#  - sign job: for every device that heartbeated (GET /licenses), fetch
+#    that device's keystore from the Worker (GET /admin/keystores/:id,
+#    admin token); generate + store one with keytool when none exists;
+#    apksigner-sign one Customer pair per device, and the Master APK
+#    only with Ajay's device key (dcef1b77e142). Each signed APK is
+#    verified against its own keystore's certificate fingerprint.
+#  - publish job: releases ONLY the per-device signed assets, then
+#    registers one update record per device (POST /admin/updates/:id,
+#    allowed=false) so no update goes out until Ajay enables it.
+#  - device job: the emulator cannot install an unsigned APK, so it
+#    signs the x86_64 split with a throwaway key that lives only on
+#    that runner and is never published.
 on:
   workflow_dispatch:
   push:
@@ -45,16 +61,19 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - run: npm ci && npm test && npm run build
       - run: npx --no-install cap sync android
-      - name: Package split debug APKs (arm64 + armeabi + x86_64)
+      - name: Package split release APKs (arm64 + armeabi + x86_64)
         working-directory: android
-        run: ./gradlew --no-daemon -PaurumVersionCode=${{ github.run_number }} -PaurumVersionName=1.0.${{ github.run_number }} :app:testDebugUnitTest :app:assembleDebug
+        run: ./gradlew --no-daemon -PaurumVersionCode=${{ github.run_number }} -PaurumVersionName=1.0.${{ github.run_number }} :app:testDebugUnitTest :app:assembleRelease
       - name: Prepare split APKs (arm64 + armeabi publish, x86_64 emulator only)
         run: |
+          # UNSIGNED by design: the sign job signs each APK per device
+          # and verifies it there. apksigner verify would fail on an
+          # unsigned APK, so only the zip integrity is checked here.
           mkdir -p phone
-          cp android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk phone/Aurum-Customer-arm64.apk
-          cp android/app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk phone/Aurum-Customer-armeabi.apk
-          cp android/app/build/outputs/apk/debug/app-x86_64-debug.apk phone/Aurum-Customer-x86_64.apk
-          for apk in phone/Aurum-Customer-arm64.apk phone/Aurum-Customer-armeabi.apk phone/Aurum-Customer-x86_64.apk; do "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$apk"; done
+          cp android/app/build/outputs/apk/release/app-arm64-v8a-release.apk phone/Aurum-Customer-arm64.apk
+          cp android/app/build/outputs/apk/release/app-armeabi-v7a-release.apk phone/Aurum-Customer-armeabi.apk
+          cp android/app/build/outputs/apk/release/app-x86_64-release.apk phone/Aurum-Customer-x86_64.apk
+          for apk in phone/Aurum-Customer-arm64.apk phone/Aurum-Customer-armeabi.apk phone/Aurum-Customer-x86_64.apk; do unzip -t -q "$apk"; done
           cd phone && sha256sum Aurum-Customer-arm64.apk Aurum-Customer-armeabi.apk > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
@@ -93,14 +112,16 @@ jobs:
         run: |
           sed -i 's|Aurum Workspace|Aurum Master 1.0.${{ github.run_number }}|g' android/app/src/main/res/values/strings.xml
           grep app_name android/app/src/main/res/values/strings.xml
-      - name: Package split debug APKs (arm64 + armeabi + x86_64)
+      - name: Package split release APKs (arm64 + armeabi + x86_64)
         working-directory: android
-        run: ./gradlew --no-daemon -PaurumAppIdSuffix=.master -PaurumVersionCode=${{ github.run_number }} -PaurumVersionName=1.0.${{ github.run_number }} :app:testDebugUnitTest :app:assembleDebug
+        run: ./gradlew --no-daemon -PaurumAppIdSuffix=.master -PaurumVersionCode=${{ github.run_number }} -PaurumVersionName=1.0.${{ github.run_number }} :app:testDebugUnitTest :app:assembleRelease
       - name: Prepare master APK (arm64 only — developer has the latest phone)
         run: |
+          # UNSIGNED by design — see the apk job; the sign job signs it
+          # with Ajay's device key and verifies it there.
           mkdir -p master
-          cp android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk master/Aurum-Master-arm64.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose master/Aurum-Master-arm64.apk
+          cp android/app/build/outputs/apk/release/app-arm64-v8a-release.apk master/Aurum-Master-arm64.apk
+          unzip -t -q master/Aurum-Master-arm64.apk
           cd master && sha256sum Aurum-Master-arm64.apk > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
@@ -109,19 +130,141 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  publish:
-    name: Publish direct phone download
+  sign:
+    name: Sign APKs per device
     needs: [apk, master]
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: write
+    timeout-minutes: 30
+    env:
+      LICENSE_SERVER: https://aurum-license-server.gahrwala.workers.dev
+      # Ajay's own phone (DCEF-1B77-E142, wire format). Only this
+      # device's key ever signs the Master APK. CI does NOT special-case
+      # his keystore — it reads whatever the Worker returns for this id,
+      # exactly like every other device.
+      AJAY_DEVICE_ID: dcef1b77e142
     steps:
       - uses: actions/download-artifact@v4
-        with: { name: aurum-phone-preview, path: phone }
+        with: { name: aurum-phone-preview, path: unsigned-phone }
       - uses: actions/download-artifact@v4
-        with: { name: aurum-master, path: master }
-      - name: Create prerelease and tappable APK link
+        with: { name: aurum-master, path: unsigned-master }
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: "21" }
+      - name: Check hosted Android SDK
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_HOME"
+          if [[ ! -f "$ANDROID_HOME/platforms/android-35/android.jar" || ! -x "$ANDROID_HOME/build-tools/35.0.0/apksigner" ]]; then
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0'
+          fi
+      - name: Sign one Customer pair per device (+ Master for Ajay)
+        env:
+          ADMIN_TOKEN: ${{ secrets.VITE_LICENSE_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          WORK="$RUNNER_TEMP/per-device-signing"
+          mkdir -p "$WORK" signed
+          echo "Fetching the device list from $LICENSE_SERVER/licenses ..."
+          LICENSES_JSON="$(curl -fsSL -H "Authorization: Bearer $ADMIN_TOKEN" "$LICENSE_SERVER/licenses")"
+          DEVICES="$(printf '%s' "$LICENSES_JSON" | python3 -c 'import json,re,sys
+          d=json.load(sys.stdin)
+          rows=d.get("licenses")
+          if not isinstance(rows,list):
+              raise SystemExit("ERROR: GET /licenses did not return a {\"licenses\": [...]} object")
+          seen=[]
+          for r in rows:
+              dev=r.get("deviceId") if isinstance(r,dict) else None
+              if not isinstance(dev,str) or not re.fullmatch(r"[0-9a-f]{12}",dev.strip().lower()):
+                  raise SystemExit("ERROR: GET /licenses returned a bad deviceId: %r" % (dev,))
+              dev=dev.strip().lower()
+              if dev not in seen:
+                  seen.append(dev)
+          if not seen:
+              raise SystemExit("ERROR: GET /licenses returned an empty device list - nothing to sign for. Refusing to ship unsigned APKs.")
+          print("\n".join(seen))')"
+          echo "Devices to sign for:"
+          printf '%s\n' "$DEVICES"
+          printf '%s\n' "$DEVICES" > "$WORK/devices.txt"
+          MASTER_DEVICE=""
+          for DEVICE in $DEVICES; do
+            echo "=== Device $DEVICE ==="
+            KS="$WORK/ks-$DEVICE.p12"
+            KS_JSON="$WORK/ks-$DEVICE.json"
+            HTTP_CODE="$(curl -sS -o "$KS_JSON" -w '%{http_code}' -H "Authorization: Bearer $ADMIN_TOKEN" "$LICENSE_SERVER/admin/keystores/$DEVICE")"
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "Keystore found in the Worker for $DEVICE."
+              KS_ALIAS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("alias") or "")' "$KS_JSON")"
+              KS_PASS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("password") or "")' "$KS_JSON")"
+              KS_B64="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("keystoreB64") or "")' "$KS_JSON")"
+              test -n "$KS_ALIAS" && test -n "$KS_PASS" && test -n "$KS_B64" || { echo "ERROR: /admin/keystores/$DEVICE returned an incomplete keystore (need keystoreB64, alias, password)"; exit 1; }
+              echo "::add-mask::$KS_PASS"
+              printf '%s' "$KS_B64" | base64 -d > "$KS"
+              test -s "$KS" || { echo "ERROR: decoded keystore for $DEVICE is empty"; exit 1; }
+            elif [ "$HTTP_CODE" = "404" ]; then
+              echo "No keystore yet for $DEVICE - generating one on this runner and storing it in the Worker."
+              KS_ALIAS="$DEVICE"
+              KS_PASS="$(openssl rand -hex 16)"
+              echo "::add-mask::$KS_PASS"
+              keytool -genkeypair -keystore "$KS" -storetype PKCS12 -alias "$KS_ALIAS" -keyalg RSA -keysize 2048 -validity 9125 -storepass "$KS_PASS" -keypass "$KS_PASS" -dname "CN=Aurum $DEVICE"
+              KS_B64="$(base64 -w0 "$KS")"
+              KS_PAYLOAD="$(KS_B64="$KS_B64" KS_ALIAS="$KS_ALIAS" KS_PASS="$KS_PASS" python3 -c 'import json,os; print(json.dumps({"keystoreB64": os.environ["KS_B64"], "alias": os.environ["KS_ALIAS"], "password": os.environ["KS_PASS"]}))')"
+              curl -fsSL -X POST "$LICENSE_SERVER/admin/keystores/$DEVICE" -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d "$KS_PAYLOAD" > /dev/null || { echo "ERROR: could not store the new keystore for $DEVICE in the Worker"; exit 1; }
+              echo "New keystore for $DEVICE stored in the Worker (the password lives only there, never in git or logs)."
+            else
+              echo "ERROR: GET /admin/keystores/$DEVICE returned HTTP $HTTP_CODE - failing loudly rather than signing with a wrong key."
+              exit 1
+            fi
+            EXPECTED_FP="$(keytool -list -v -keystore "$KS" -storepass "$KS_PASS" | awk -F': ' '/SHA256:/ {print $2; exit}')"
+            test -n "$EXPECTED_FP" || { echo "ERROR: could not read the certificate fingerprint for $DEVICE"; exit 1; }
+            for ABI in arm64 armeabi; do
+              SRC="unsigned-phone/Aurum-Customer-$ABI.apk"
+              DST="signed/Aurum-Customer-$DEVICE-$ABI.apk"
+              test -s "$SRC" || { echo "ERROR: missing unsigned APK $SRC"; exit 1; }
+              "$APKSIGNER" sign --ks "$KS" --ks-pass "pass:$KS_PASS" --ks-key-alias "$KS_ALIAS" --key-pass "pass:$KS_PASS" --out "$DST" "$SRC"
+              "$APKSIGNER" verify --verbose "$DST"
+              "$APKSIGNER" verify --print-certs "$DST" | grep -F "SHA-256 digest: $EXPECTED_FP" || { echo "ERROR: $DST is NOT signed with device $DEVICE's keystore (expected SHA-256 $EXPECTED_FP)"; exit 1; }
+              echo "Signed + verified $DST"
+            done
+            if [ "$DEVICE" = "$AJAY_DEVICE_ID" ]; then
+              SRC="unsigned-master/Aurum-Master-arm64.apk"
+              DST="signed/Aurum-Master-arm64.apk"
+              test -s "$SRC" || { echo "ERROR: missing unsigned Master APK $SRC"; exit 1; }
+              "$APKSIGNER" sign --ks "$KS" --ks-pass "pass:$KS_PASS" --ks-key-alias "$KS_ALIAS" --key-pass "pass:$KS_PASS" --out "$DST" "$SRC"
+              "$APKSIGNER" verify --verbose "$DST"
+              "$APKSIGNER" verify --print-certs "$DST" | grep -F "SHA-256 digest: $EXPECTED_FP" || { echo "ERROR: $DST is NOT signed with Ajay's keystore (expected SHA-256 $EXPECTED_FP)"; exit 1; }
+              echo "Signed + verified $DST (Master, Ajay's device only)"
+              MASTER_DEVICE="$DEVICE"
+            fi
+            unset KS_PASS KS_B64 KS_ALIAS
+          done
+          if [ -z "$MASTER_DEVICE" ]; then
+            echo "NOTE: Ajay's device ($AJAY_DEVICE_ID) is not in the device list - no Master APK will be published from this build."
+          fi
+          cp "$WORK/devices.txt" signed/devices.txt
+          printf '%s' "$MASTER_DEVICE" > signed/master_device.txt
+          rm -f "$WORK"/ks-*.p12 "$WORK"/ks-*.json
+          (cd signed && sha256sum Aurum-*.apk > SHA256SUMS.txt)
+          ls -l signed/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aurum-signed
+          path: signed/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish direct phone download
+    needs: [sign]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      AJAY_DEVICE_ID: dcef1b77e142
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: aurum-signed, path: signed }
+      - name: Create prerelease and per-device download links
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -130,21 +273,83 @@ jobs:
           TAG: phone-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          cat phone/SHA256SUMS.txt master/SHA256SUMS.txt > SHA256SUMS.txt
-          gh release create "$TAG" phone/Aurum-Customer-arm64.apk phone/Aurum-Customer-armeabi.apk master/Aurum-Master-arm64.apk SHA256SUMS.txt \
+          export BASE="$SERVER/$REPO/releases/download/$TAG"
+          test -s signed/SHA256SUMS.txt
+          ls signed/Aurum-*.apk
+          gh release create "$TAG" signed/Aurum-*.apk signed/SHA256SUMS.txt \
             --repo "$REPO" --target "$SHA" --prerelease \
             --title "Aurum · Android phone preview #$GITHUB_RUN_NUMBER" \
-            --notes 'Phone test only. User app: Aurum-Customer-arm64.apk (latest phones) or Aurum-Customer-armeabi.apk (older/medium phones). Master app (developer only, one APK): Aurum-Master-arm64.apk. The x86_64 split is built for the emulator test only and is not published. Sample data resets on reload. No production account or signing secret is included. Each hosted runner uses a disposable debug signing key; uninstall the previous preview if Android rejects an update.'
+            --notes "Phone preview. Every shop gets its own APKs, signed with that shop's own key — an update for one shop cannot install on another shop's phone. Customer app: Aurum-Customer-<deviceId>-arm64.apk (latest phones) or Aurum-Customer-<deviceId>-armeabi.apk (older/medium phones); use the files matching your shop's device. Master app (developer only, one APK): Aurum-Master-arm64.apk. The x86_64 split is built for the emulator test only and is not published. Sample data resets on reload. No production account or signing secret is included. Each shop's APK installs over that shop's 1.0.45 and later builds without uninstalling; builds older than 1.0.45 still need one uninstall first. Updates stay off until Ajay enables them per shop."
           {
             echo '## Your phone builds are ready'
-            echo "**[⬇ Download user APK (latest phones, arm64)]($SERVER/$REPO/releases/download/$TAG/Aurum-Customer-arm64.apk)**"
-            echo "**[⬇ Download user APK (older phones, armeabi)]($SERVER/$REPO/releases/download/$TAG/Aurum-Customer-armeabi.apk)**"
-            echo "**[⬇ Download master APK (latest phones, arm64)]($SERVER/$REPO/releases/download/$TAG/Aurum-Master-arm64.apk)**"
+            echo ''
+            while read -r DEVICE; do
+              [ -n "$DEVICE" ] || continue
+              echo "**Shop $DEVICE — [⬇ Customer arm64]($BASE/Aurum-Customer-$DEVICE-arm64.apk) · [⬇ Customer armeabi]($BASE/Aurum-Customer-$DEVICE-armeabi.apk)**"
+            done < signed/devices.txt
+            if [ -s signed/master_device.txt ]; then
+              echo "**[⬇ Download master APK (Ajay only, arm64)]($BASE/Aurum-Master-arm64.apk)**"
+            fi
             echo ''
             echo 'फोन पर लिंक टैप करें → डाउनलोड हुई APK खोलें → Android की अनुमति देखकर Install दबाएँ।'
             echo ''
             echo 'Demo only. A workflow cannot silently download, install or launch an app on your phone.'
           } >> "$GITHUB_STEP_SUMMARY"
+      # OPEN CONTRACT POINT (masterArm64Url for non-Ajay devices): the
+      # Worker validates update records and requires non-empty https
+      # URLs, so an empty masterArm64Url string would fail validation.
+      # This job therefore OMITS masterArm64Url from the payload for
+      # devices without a Master build — the Worker must accept a
+      # missing masterArm64Url for those devices. The alternative is
+      # signing the Master APK with every device's key (wasteful, and
+      # the Master app only runs on Ajay's phone). For the first build
+      # this is moot: only Ajay's device exists, and its record carries
+      # the real Master asset URL.
+      - name: Register per-device updates on license server (allowed=false)
+        env:
+          ADMIN_TOKEN: ${{ secrets.VITE_LICENSE_ADMIN_TOKEN }}
+          TAG: phone-${{ github.run_id }}-${{ github.run_attempt }}
+          VERSION: 1.0.${{ github.run_number }}
+          SERVER: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          export BASE="$SERVER/$REPO/releases/download/$TAG"
+          while read -r DEVICE; do
+            [ -n "$DEVICE" ] || continue
+            MASTER_URL=""
+            if [ "$DEVICE" = "$AJAY_DEVICE_ID" ] && [ -s signed/master_device.txt ]; then
+              MASTER_URL="$BASE/Aurum-Master-arm64.apk"
+            fi
+            if [ -z "$MASTER_URL" ]; then
+              echo "NOTE: no Master APK for device $DEVICE - masterArm64Url is omitted from its update record (Worker must accept a missing masterArm64Url; see the workflow comment above this step)."
+            fi
+            PAYLOAD="$(DEVICE="$DEVICE" MASTER_URL="$MASTER_URL" python3 -c 'import json,os
+          p={"version": os.environ["VERSION"], "customerArm64Url": os.environ["BASE"] + "/Aurum-Customer-" + os.environ["DEVICE"] + "-arm64.apk", "customerArmeabiUrl": os.environ["BASE"] + "/Aurum-Customer-" + os.environ["DEVICE"] + "-armeabi.apk", "allowed": False, "mandatory": False}
+          m=os.environ.get("MASTER_URL") or ""
+          if m:
+              p["masterArm64Url"]=m
+          print(json.dumps(p))')"
+            echo "Registering update $VERSION for device $DEVICE (allowed=false)..."
+            OK=0
+            for attempt in 1 2 3; do
+              if curl -fsSL -X POST "https://aurum-license-server.gahrwala.workers.dev/admin/updates/$DEVICE" \
+                  -H "Authorization: Bearer $ADMIN_TOKEN" \
+                  -H "Content-Type: application/json" \
+                  -d "$PAYLOAD"; then
+                echo "Update registered for $DEVICE (attempt $attempt)."
+                OK=1
+                break
+              fi
+              echo "Update POST for $DEVICE failed (attempt $attempt/3); retrying in 10s..."
+              sleep 10
+            done
+            if [ "$OK" != "1" ]; then
+              echo "ERROR: could not register update $VERSION for device $DEVICE after 3 attempts - in-app updates depend on this record."
+              exit 1
+            fi
+          done < signed/devices.txt
+          echo "All per-device update records registered (allowed=false - Ajay enables each shop from the Master app)."
 
   device:
     name: Android system Back and print dialog (API 35)
@@ -159,6 +364,26 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { name: aurum-phone-preview, path: phone }
       - run: npm ci
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: "21" }
+      - name: Check hosted Android SDK
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_HOME"
+          if [[ ! -f "$ANDROID_HOME/platforms/android-35/android.jar" || ! -x "$ANDROID_HOME/build-tools/35.0.0/apksigner" ]]; then
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0'
+          fi
+      - name: Sign the emulator APK with a throwaway key (emulator test only)
+        run: |
+          set -euo pipefail
+          # The apk job now ships UNSIGNED APKs (per-device signing
+          # happens in the sign job), and adb cannot install an unsigned
+          # APK. Sign the x86_64 split here with a throwaway key that
+          # exists only on this runner and is never published or reused.
+          keytool -genkeypair -keystore "$RUNNER_TEMP/emulator-test.p12" -storetype PKCS12 -alias emulator-test -keyalg RSA -keysize 2048 -validity 30 -storepass emulator-test -keypass emulator-test -dname "CN=Aurum emulator test"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign --ks "$RUNNER_TEMP/emulator-test.p12" --ks-pass pass:emulator-test --ks-key-alias emulator-test --key-pass pass:emulator-test --out phone/Aurum-Customer-x86_64-signed.apk phone/Aurum-Customer-x86_64.apk
+          mv phone/Aurum-Customer-x86_64-signed.apk phone/Aurum-Customer-x86_64.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose phone/Aurum-Customer-x86_64.apk
       - name: Enable hosted KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
