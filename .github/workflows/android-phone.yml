@@ -8,7 +8,9 @@ name: Android phone preview
 #    that device's keystore from the Worker (GET /admin/keystores/:id,
 #    admin token); generate + store one with keytool when none exists;
 #    apksigner-sign one Customer pair per device, and the Master APK
-#    only with Ajay's device key (dcef1b77e142). Each signed APK is
+#    only with Ajay's device key (AJAY_DEVICE_ID env — his current
+#    phone; reinstalls change it, so keep it in sync with the license
+#    server's device list, not with an old install's id).
 #    verified against its own keystore's certificate fingerprint.
 #  - publish job: releases ONLY the per-device signed assets, then
 #    registers one update record per device (POST /admin/updates/:id,
@@ -137,11 +139,14 @@ jobs:
     timeout-minutes: 30
     env:
       LICENSE_SERVER: https://aurum-license-server.gahrwala.workers.dev
-      # Ajay's own phone (DCEF-1B77-E142, wire format). Only this
+      # Ajay's own phone (1F6A-A766-EDBF, wire format). Only this
       # device's key ever signs the Master APK. CI does NOT special-case
       # his keystore — it reads whatever the Worker returns for this id,
       # exactly like every other device.
-      AJAY_DEVICE_ID: dcef1b77e142
+      # NOTE 2026-11-26: the old id DCEF-1B77-E142 was from the 24 Nov
+      # install — uninstall/reinstall gives the phone a new Device ID,
+      # and the license server's only device row is now 1f6aa766edbf.
+      AJAY_DEVICE_ID: 1f6aa766edbf
     steps:
       - uses: actions/download-artifact@v4
         with: { name: aurum-phone-preview, path: unsigned-phone }
@@ -222,7 +227,10 @@ jobs:
               test -s "$SRC" || { echo "ERROR: missing unsigned APK $SRC"; exit 1; }
               "$APKSIGNER" sign --ks "$KS" --ks-pass "pass:$KS_PASS" --ks-key-alias "$KS_ALIAS" --key-pass "pass:$KS_PASS" --out "$DST" "$SRC"
               "$APKSIGNER" verify --verbose "$DST"
-              "$APKSIGNER" verify --print-certs "$DST" | grep -F "SHA-256 digest: $EXPECTED_FP" || { echo "ERROR: $DST is NOT signed with device $DEVICE's keystore (expected SHA-256 $EXPECTED_FP)"; exit 1; }
+              # NOTE: keytool prints the fingerprint in UPPERCASE hex,
+              # apksigner --print-certs prints it in lowercase — the
+              # match must be case-insensitive or it fails every run.
+              "$APKSIGNER" verify --print-certs "$DST" | grep -iF "SHA-256 digest: $EXPECTED_FP" || { echo "ERROR: $DST is NOT signed with device $DEVICE's keystore (expected SHA-256 $EXPECTED_FP)"; exit 1; }
               echo "Signed + verified $DST"
             done
             if [ "$DEVICE" = "$AJAY_DEVICE_ID" ]; then
@@ -231,7 +239,7 @@ jobs:
               test -s "$SRC" || { echo "ERROR: missing unsigned Master APK $SRC"; exit 1; }
               "$APKSIGNER" sign --ks "$KS" --ks-pass "pass:$KS_PASS" --ks-key-alias "$KS_ALIAS" --key-pass "pass:$KS_PASS" --out "$DST" "$SRC"
               "$APKSIGNER" verify --verbose "$DST"
-              "$APKSIGNER" verify --print-certs "$DST" | grep -F "SHA-256 digest: $EXPECTED_FP" || { echo "ERROR: $DST is NOT signed with Ajay's keystore (expected SHA-256 $EXPECTED_FP)"; exit 1; }
+              "$APKSIGNER" verify --print-certs "$DST" | grep -iF "SHA-256 digest: $EXPECTED_FP" || { echo "ERROR: $DST is NOT signed with Ajay's keystore (expected SHA-256 $EXPECTED_FP)"; exit 1; }
               echo "Signed + verified $DST (Master, Ajay's device only)"
               MASTER_DEVICE="$DEVICE"
             fi
@@ -260,7 +268,8 @@ jobs:
     permissions:
       contents: write
     env:
-      AJAY_DEVICE_ID: dcef1b77e142
+      # Same id as the sign job — Ajay's current phone (see note there).
+      AJAY_DEVICE_ID: 1f6aa766edbf
     steps:
       - uses: actions/download-artifact@v4
         with: { name: aurum-signed, path: signed }
