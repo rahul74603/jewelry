@@ -70,9 +70,9 @@ jobs:
           # and verifies it there. apksigner verify would fail on an
           # unsigned APK, so only the zip integrity is checked here.
           mkdir -p phone
-          cp android/app/build/outputs/apk/release/app-arm64-v8a-release.apk phone/Aurum-Customer-arm64.apk
-          cp android/app/build/outputs/apk/release/app-armeabi-v7a-release.apk phone/Aurum-Customer-armeabi.apk
-          cp android/app/build/outputs/apk/release/app-x86_64-release.apk phone/Aurum-Customer-x86_64.apk
+          cp android/app/build/outputs/apk/release/app-arm64-v8a-release-unsigned.apk phone/Aurum-Customer-arm64.apk
+          cp android/app/build/outputs/apk/release/app-armeabi-v7a-release-unsigned.apk phone/Aurum-Customer-armeabi.apk
+          cp android/app/build/outputs/apk/release/app-x86_64-release-unsigned.apk phone/Aurum-Customer-x86_64.apk
           for apk in phone/Aurum-Customer-arm64.apk phone/Aurum-Customer-armeabi.apk phone/Aurum-Customer-x86_64.apk; do unzip -t -q "$apk"; done
           cd phone && sha256sum Aurum-Customer-arm64.apk Aurum-Customer-armeabi.apk > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
@@ -120,7 +120,7 @@ jobs:
           # UNSIGNED by design — see the apk job; the sign job signs it
           # with Ajay's device key and verifies it there.
           mkdir -p master
-          cp android/app/build/outputs/apk/release/app-arm64-v8a-release.apk master/Aurum-Master-arm64.apk
+          cp android/app/build/outputs/apk/release/app-arm64-v8a-release-unsigned.apk master/Aurum-Master-arm64.apk
           unzip -t -q master/Aurum-Master-arm64.apk
           cd master && sha256sum Aurum-Master-arm64.apk > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
