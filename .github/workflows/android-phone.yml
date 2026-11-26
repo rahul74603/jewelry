@@ -182,6 +182,10 @@ jobs:
               if not isinstance(dev,str) or not re.fullmatch(r"[0-9a-f]{12}",dev.strip().lower()):
                   raise SystemExit("ERROR: GET /licenses returned a bad deviceId: %r" % (dev,))
               dev=dev.strip().lower()
+              model=r.get("model") if isinstance(r,dict) else ""
+              if isinstance(model,str) and (model.strip().lower().startswith("sdk_") or "emulator" in model.strip().lower()):
+                  print("Skipping emulator device %s (model %r) - it is a CI test phone, not a shop." % (dev, model), file=sys.stderr)
+                  continue
               if dev not in seen:
                   seen.append(dev)
           if not seen:
@@ -190,6 +194,20 @@ jobs:
           echo "Devices to sign for:"
           printf '%s\n' "$DEVICES"
           printf '%s\n' "$DEVICES" > "$WORK/devices.txt"
+          # Fingerprint check: keytool prints the SHA-256 fingerprint
+          # UPPERCASE with colons, apksigner --print-certs prints it
+          # lowercase (and spacing differs between tool versions), so
+          # a fixed-string grep fails even when the signature is
+          # correct (runs #46/#47). Compare the bare hex instead —
+          # no colons, no whitespace, lowercase — and print BOTH
+          # values on failure so the next diagnosis is not blind.
+          verify_fp() {
+            local actual actual_norm expected_norm
+            actual="$( "$APKSIGNER" verify --print-certs "$1" | awk -F'SHA-256 digest: ' '/SHA-256 digest:/ {print $2; exit}' )"
+            actual_norm="$(printf '%s' "$actual" | tr -d '[:space:]:' | tr 'A-F' 'a-f')"
+            expected_norm="$(printf '%s' "$2" | tr -d '[:space:]:' | tr 'A-F' 'a-f')"
+            [ -n "$actual_norm" ] && [ "$actual_norm" = "$expected_norm" ] || { echo "ERROR: $1 is NOT signed with $3 (expected SHA-256 $2, got ${actual:-<none>})"; return 1; }
+          }
           MASTER_DEVICE=""
           for DEVICE in $DEVICES; do
             echo "=== Device $DEVICE ==="
@@ -227,10 +245,7 @@ jobs:
               test -s "$SRC" || { echo "ERROR: missing unsigned APK $SRC"; exit 1; }
               "$APKSIGNER" sign --ks "$KS" --ks-pass "pass:$KS_PASS" --ks-key-alias "$KS_ALIAS" --key-pass "pass:$KS_PASS" --out "$DST" "$SRC"
               "$APKSIGNER" verify --verbose "$DST"
-              # NOTE: keytool prints the fingerprint in UPPERCASE hex,
-              # apksigner --print-certs prints it in lowercase — the
-              # match must be case-insensitive or it fails every run.
-              "$APKSIGNER" verify --print-certs "$DST" | grep -iF "SHA-256 digest: $EXPECTED_FP" || { echo "ERROR: $DST is NOT signed with device $DEVICE's keystore (expected SHA-256 $EXPECTED_FP)"; exit 1; }
+              verify_fp "$DST" "$EXPECTED_FP" "device $DEVICE's keystore" || exit 1
               echo "Signed + verified $DST"
             done
             if [ "$DEVICE" = "$AJAY_DEVICE_ID" ]; then
@@ -239,7 +254,7 @@ jobs:
               test -s "$SRC" || { echo "ERROR: missing unsigned Master APK $SRC"; exit 1; }
               "$APKSIGNER" sign --ks "$KS" --ks-pass "pass:$KS_PASS" --ks-key-alias "$KS_ALIAS" --key-pass "pass:$KS_PASS" --out "$DST" "$SRC"
               "$APKSIGNER" verify --verbose "$DST"
-              "$APKSIGNER" verify --print-certs "$DST" | grep -iF "SHA-256 digest: $EXPECTED_FP" || { echo "ERROR: $DST is NOT signed with Ajay's keystore (expected SHA-256 $EXPECTED_FP)"; exit 1; }
+              verify_fp "$DST" "$EXPECTED_FP" "Ajay's keystore" || exit 1
               echo "Signed + verified $DST (Master, Ajay's device only)"
               MASTER_DEVICE="$DEVICE"
             fi
