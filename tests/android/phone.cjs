@@ -231,6 +231,15 @@ async function select(label, value) {
     ),
   );
 }
+// Type into a text input by CSS selector, the same way unlockIfNeeded sets
+// the key: native setter + input event, no physical tap, so no IME opens.
+async function type(selector, value) {
+  await until("type into " + selector, () =>
+    evaluate(
+      `(()=>{const i=document.querySelector(${JSON.stringify(selector)});if(!i)return false;const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;set.call(i,${JSON.stringify(value)});i.dispatchEvent(new Event('input',{bubbles:true}));return i.value===${JSON.stringify(value)};})()`,
+    ),
+  );
+}
 const detail = '[role="dialog"][data-state="open"]';
 const foreground = () =>
   until("shop in foreground", () => focus().includes(pkg));
@@ -288,7 +297,9 @@ test("Topmost modal before drawer, drawer before route", async () => {
 async function newSale() {
   await go("/billing");
   await click('.page-head a[href="#/billing/new"]');
-  await btn("Add product to bill");
+  // v1.0.43 single-screen bill: search the stock inline and tap the result.
+  // (The old "Add product to bill" picker dialog no longer exists.)
+  await type('input[placeholder*="Stock me khojo"]', "Heritage gold bangle");
   await btn("Heritage gold bangle", true);
   await has(".bill-line", "Heritage gold bangle");
   await absent(detail);
@@ -321,7 +332,9 @@ test("First Dashboard Back shows the nonblocking hint", async () => {
   await foreground();
 });
 test("Dashboard timeout resets the exit window", async () => {
-  await go("/rates");
+  // Any page away from the Dashboard works here; /rates no longer exists
+  // (v1.0.43 removed Metal Rates from the sidebar — rate goes on the bill).
+  await go("/inventory");
   await home();
   key();
   await has(".toast", "Press back");
@@ -400,7 +413,8 @@ async function prepare(format) {
       "Silver anklet pair",
       "Antique gold chain",
     ]) {
-      await btn("Add product to bill");
+      // v1.0.43: same inline stock search as newSale() — no picker dialog.
+      await type('input[placeholder*="Stock me khojo"]', name);
       await btn(name, true);
       await absent(detail);
     }
