@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import {
+  LOAN_CUSTOMER_REQUIRED,
   buildQuickProduct,
   findCustomerByPhone,
   normalizePhone,
@@ -115,6 +116,53 @@ describe("Bill-screen customer (section 01)", () => {
         { required: false },
       ),
     ).toEqual({ customerId: "", create: null });
+  });
+
+  it("reuses the matched customer when resolving, with +91 / 0 / spaces", () => {
+    const customers: Customer[] = [
+      {
+        id: "c1",
+        name: "Priya",
+        phone: "9876543210",
+        email: "",
+        address: "Old address",
+        gstin: "",
+      },
+    ];
+    // Same number typed three ways — always the same old record, no duplicate.
+    for (const phone of ["+91 98765 43210", "09876543210", "98765 43210"]) {
+      expect(
+        resolveBillCustomer(
+          customers,
+          { name: "Priya", phone, address: "New address typed" },
+          { required: true, requiredError: LOAN_CUSTOMER_REQUIRED },
+        ),
+      ).toEqual({ customerId: "c1", create: null });
+    }
+  });
+
+  it("a loan form's required error names this form's customer fields — billing keeps its own wording", () => {
+    const res = resolveBillCustomer(
+      [],
+      { name: "", phone: "98765 43210", address: "" },
+      { required: true, requiredError: LOAN_CUSTOMER_REQUIRED },
+    );
+    expect("error" in res).toBe(true);
+    if (!("error" in res)) throw Error("expected an error");
+    expect(res.error).toBe(LOAN_CUSTOMER_REQUIRED);
+    expect(res.error).toContain("Customer ka naam likho");
+    expect(res.error).not.toContain("01 Customer");
+    // No override: billing's wording is unchanged.
+    expect(
+      resolveBillCustomer(
+        [],
+        { name: "", phone: "98765 43210", address: "" },
+        { required: true },
+      ),
+    ).toEqual({
+      error:
+        "Udhar ke liye customer ka naam likho — upar 01 Customer me naam likho.",
+    });
   });
 });
 
@@ -327,5 +375,33 @@ describe("No Metal Rates page anymore (sidebar + dashboard)", () => {
 
   it("billing screen no longer links to /rates", () => {
     expect(billing).not.toContain('to="/rates"');
+  });
+});
+
+describe("Loan form uses the bill's inline customer fields", () => {
+  const loans = readFileSync(
+    new URL("../src/pages/Loans.tsx", import.meta.url),
+    "utf8",
+  );
+
+  it("has no customer dropdown and no 'add a customer first' dead end", () => {
+    expect(loans).not.toContain("Add a customer first");
+    expect(loans).not.toContain('label="Customer"');
+  });
+
+  it("types naam, mobile and address on the form itself, like billing section 01", () => {
+    expect(loans).toContain('label="Customer ka naam"');
+    expect(loans).toContain('label="Mobile number"');
+    expect(loans).toContain('label="Address"');
+    expect(loans).toContain("onCustPhone");
+    expect(loans).toContain("findCustomerByPhone");
+  });
+
+  it("resolves the customer with required: true and the loan form's own error wording", () => {
+    expect(loans).toContain("resolveBillCustomer");
+    expect(loans).toContain("required: true");
+    expect(loans).toContain("requiredError: LOAN_CUSTOMER_REQUIRED");
+    expect(loans).toContain('perform("customer", res.create)');
+    expect(loans).toContain('perform("loan", loan)');
   });
 });

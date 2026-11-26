@@ -40,6 +40,11 @@ import {
   loadSentLog,
   sentTodayLoanIds,
 } from "../lib/autoSms";
+import {
+  LOAN_CUSTOMER_REQUIRED,
+  findCustomerByPhone,
+  resolveBillCustomer,
+} from "../lib/billFlow";
 
 const stateText = (l: Loan) =>
   ({
@@ -61,7 +66,12 @@ function LoanForm({ close }: { close: () => void }) {
     [error, E] = useState(""),
     [busy, B] = useState(false),
     [kind, K] = useState<"girvi" | "emi">("girvi"),
-    [customerId, C] = useState(data.customers[0]?.id ?? ""),
+    // Customer — bill jaisa hi, form ke upar type karo: naam, mobile,
+    // address. Pehle dropdown se purana grahak chunna padta tha; ab
+    // yahin likho aur yahin save ho jayega.
+    [custName, setCustName] = useState(""),
+    [custPhone, setCustPhone] = useState(""),
+    [custAddress, setCustAddress] = useState(""),
     [itemName, N] = useState(""),
     [itemMetal, M] = useState("Gold"),
     [itemPurity, P] = useState("22K"),
@@ -75,6 +85,19 @@ function LoanForm({ close }: { close: () => void }) {
     [dueAt, D] = useState(
       new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
     );
+  // Billing jaisa hi: mobile milte hi purane grahak ka naam aur
+  // address bhar jata hai; na mile to save karte waqt naya grahak banta hai.
+  const matchedCustomer = custPhone
+    ? findCustomerByPhone(data.customers, custPhone)
+    : undefined;
+  const onCustPhone = (v: string) => {
+    setCustPhone(v);
+    const match = findCustomerByPhone(data.customers, v);
+    if (match) {
+      setCustName(match.name);
+      setCustAddress(match.address);
+    }
+  };
   const submit = async () => {
     E("");
     const num = (v: string) => {
@@ -82,7 +105,17 @@ function LoanForm({ close }: { close: () => void }) {
       return Number.isFinite(n) ? n : NaN;
     };
     try {
-      if (!customerId) throw Error("Add a customer first, then create the record.");
+      // Customer pehle resolve karo (pure — abhi kuch save nahi hota):
+      // mobile mila to purana grahak, naam likha to naya, kuch nahi to
+      // error. Girvi / EMI hamesha udhar hota hai — bina customer ke
+      // record nahi ban sakta, isliye required: true.
+      const res = resolveBillCustomer(
+        data.customers,
+        { name: custName, phone: custPhone, address: custAddress },
+        { required: true, requiredError: LOAN_CUSTOMER_REQUIRED },
+      );
+      if ("error" in res) throw Error(res.error);
+      if (!res.customerId) throw Error(LOAN_CUSTOMER_REQUIRED);
       if (!itemName.trim()) throw Error("Enter the item name.");
       const principalRs = kind === "girvi" ? num(principal) : num(total) - num(upfront);
       const totalRs = kind === "girvi" ? num(principal) : num(total);
@@ -102,7 +135,7 @@ function LoanForm({ close }: { close: () => void }) {
       const loan: Loan = loanSchema.parse({
         id: `loan-${key()}`,
         kind,
-        customerId,
+        customerId: res.customerId,
         itemName: itemName.trim(),
         itemMetal: itemMetal.trim() || "Gold",
         itemPurity: itemPurity.trim() || "",
@@ -119,6 +152,12 @@ function LoanForm({ close }: { close: () => void }) {
         createdAt: new Date().toISOString(),
       });
       B(true);
+      // Naya grahak pehle save karo, phir usse juda loan — loan ko
+      // customer ka id chahiye, aur validation upar ho chuki hai.
+      if (res.create) {
+        await perform("customer", res.create);
+        notify("Customer save ho gaya.");
+      }
       await perform("loan", loan);
       notify(kind === "girvi" ? "Girvi record added." : "EMI record added.");
       close();
@@ -131,6 +170,33 @@ function LoanForm({ close }: { close: () => void }) {
   return (
     <div>
       <div className="form-grid">
+        <Field label="Customer ka naam">
+          <input
+            value={custName}
+            onChange={(e) => setCustName(e.target.value)}
+            placeholder="e.g. Ramesh Kumar"
+          />
+        </Field>
+        <Field label="Mobile number">
+          <input
+            value={custPhone}
+            onChange={(e) => onCustPhone(e.target.value)}
+            placeholder="e.g. 98765 43210"
+            inputMode="tel"
+          />
+        </Field>
+        <Field label="Address" full>
+          <input
+            value={custAddress}
+            onChange={(e) => setCustAddress(e.target.value)}
+            placeholder="Gaon / mohalla, sheher"
+          />
+        </Field>
+        {matchedCustomer && (
+          <p className="muted">
+            Purana grahak mil gaya — naam aur address bhar gaya hai.
+          </p>
+        )}
         <div className="field full">
           <span>Type</span>
           <span className="seg-row">
@@ -150,16 +216,6 @@ function LoanForm({ close }: { close: () => void }) {
             </button>
           </span>
         </div>
-        <Field label="Customer" full>
-          <Select value={customerId} onChange={(e) => C(e.target.value)}>
-            {data.customers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-                {c.phone ? ` · ${c.phone}` : ""}
-              </option>
-            ))}
-          </Select>
-        </Field>
         <Field label="Item name" full>
           <input
             value={itemName}

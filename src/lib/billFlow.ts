@@ -53,6 +53,15 @@ export type BillCustomerResolution =
   | { error: string };
 
 /**
+ * Girvi / EMI hamesha udhar hota hai — record bina customer ke nahi
+ * ban sakta. Loan form billing wala "01 Customer" message nahi de
+ * sakta (wahan koi 01 section nahi hai), isliye ye apna message
+ * resolveBillCustomer ko requiredError ke roop me deta hai.
+ */
+export const LOAN_CUSTOMER_REQUIRED =
+  "Girvi / EMI ke liye customer ka naam likho — upar Customer ka naam likho.";
+
+/**
  * Decide what the customer section on the bill means at save time.
  *
  * - Mobile matches an existing customer → reuse them (no duplicate).
@@ -62,11 +71,13 @@ export type BillCustomerResolution =
  *   (udhar / advance) → plain-Hindi error instead of a silent walk-in.
  * `required` is false for a full payment or an estimate, where a
  * nameless phone can simply be ignored.
+ * `requiredError` overrides the error wording (the loan form passes
+ * its own message); billing passes nothing and keeps its wording.
  */
 export function resolveBillCustomer(
   customers: Customer[],
   fields: BillCustomerFields,
-  opts: { required: boolean },
+  opts: { required: boolean; requiredError?: string },
 ): BillCustomerResolution {
   const name = fields.name.trim();
   const phone = fields.phone.trim();
@@ -87,6 +98,7 @@ export function resolveBillCustomer(
   if ((phone || address) && opts.required)
     return {
       error:
+        opts.requiredError ??
         "Udhar ke liye customer ka naam likho — upar 01 Customer me naam likho.",
     };
   return { customerId: "", create: null };

@@ -21,6 +21,10 @@ import {
 } from "../functions/src/core/loans";
 import { demoMutation, seedDemo } from "../src/lib/demo";
 import {
+  LOAN_CUSTOMER_REQUIRED,
+  resolveBillCustomer,
+} from "../src/lib/billFlow";
+import {
   countsFor,
   createBackup,
   parseBackup,
@@ -276,6 +280,70 @@ describe("compound interest (chakravarti byaj)", () => {
         compound: true,
       }),
     ).toThrow("Only an active record");
+  });
+});
+
+describe("loan-form customer (same inline fields as the bill)", () => {
+  it("saves a new customer first, then the girvi record linked to them — a second record with the same phone reuses them", () => {
+    // Fresh shop: no customers, no loans — the exact counter flow.
+    let w = emptyWorkspace(makeProfile("Test shop", "Owner", ""));
+    // 1. Shopkeeper types a new name + phone in the loan form.
+    const res = resolveBillCustomer(
+      w.customers,
+      { name: "Ramesh Kumar", phone: "+91 98765 43210", address: "Main Bazar" },
+      { required: true, requiredError: LOAN_CUSTOMER_REQUIRED },
+    );
+    expect("error" in res).toBe(false);
+    if ("error" in res) throw Error("unexpected error");
+    expect(res.create?.name).toBe("Ramesh Kumar");
+    expect(res.create?.phone).toBe("+91 98765 43210");
+    // 2. Customer is saved BEFORE the loan (LoanForm submit order).
+    if (res.create) w = demoMutation(w, "customer", res.create);
+    expect(w.customers).toHaveLength(1);
+    // 3. Girvi record saved with the resolved customerId.
+    w = demoMutation(
+      w,
+      "loan",
+      loan({ id: "loan-form-1", customerId: res.customerId }),
+    );
+    const saved = w.loans.find((l) => l.id === "loan-form-1")!;
+    expect(saved.customerId).toBe(res.customerId);
+    expect(saved.customerId).toBe(w.customers[0].id);
+    // 4. Second record, same phone typed without +91 — reuses the
+    // customer, no duplicate is created.
+    const res2 = resolveBillCustomer(
+      w.customers,
+      { name: "Ramesh Kumar", phone: "9876543210", address: "Main Bazar" },
+      { required: true, requiredError: LOAN_CUSTOMER_REQUIRED },
+    );
+    expect(res2).toEqual({ customerId: w.customers[0].id, create: null });
+    if ("error" in res2) throw Error("unexpected error");
+    w = demoMutation(
+      w,
+      "loan",
+      loan({
+        id: "loan-form-2",
+        kind: "emi",
+        customerId: res2.customerId,
+      }),
+    );
+    expect(w.customers).toHaveLength(1);
+    expect(w.loans.find((l) => l.id === "loan-form-2")!.customerId).toBe(
+      w.customers[0].id,
+    );
+  });
+
+  it("refuses a record when no customer name is typed at all", () => {
+    // Everything blank resolves to a walk-in — a loan must never
+    // accept that, so LoanForm rejects it with the loan-form message.
+    const res = resolveBillCustomer(
+      [],
+      { name: "", phone: "", address: "" },
+      { required: true, requiredError: LOAN_CUSTOMER_REQUIRED },
+    );
+    expect(res).toEqual({ customerId: "", create: null });
+    expect(LOAN_CUSTOMER_REQUIRED).toContain("Customer ka naam likho");
+    expect(LOAN_CUSTOMER_REQUIRED).not.toContain("01 Customer");
   });
 });
 
