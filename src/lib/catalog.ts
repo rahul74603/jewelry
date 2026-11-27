@@ -14,7 +14,7 @@ export type MetalName = (typeof METALS)[number];
 
 /** Purity / grade options for each metal. */
 export const PURITY_BY_METAL: Record<string, string[]> = {
-  Gold: ["24K", "22K", "18K", "14K"],
+  Gold: ["24K", "22K", "20K", "18K", "14K"],
   Silver: ["999", "925", "800"],
   Diamond: ["Natural", "Lab-grown"],
   Platinum: ["950", "900"],

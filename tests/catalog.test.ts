@@ -21,7 +21,7 @@ describe("Catalogue dropdown lists", () => {
   });
 
   it("offers the standard purity for each metal", () => {
-    expect(PURITY_BY_METAL.Gold).toEqual(["24K", "22K", "18K", "14K"]);
+    expect(PURITY_BY_METAL.Gold).toEqual(["24K", "22K", "20K", "18K", "14K"]);
     expect(PURITY_BY_METAL.Silver).toEqual(["999", "925", "800"]);
     expect(PURITY_BY_METAL.Diamond).toEqual(["Natural", "Lab-grown"]);
     expect(PURITY_BY_METAL.Platinum).toEqual(["950", "900"]);
