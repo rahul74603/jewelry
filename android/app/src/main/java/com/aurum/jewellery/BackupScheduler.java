@@ -28,7 +28,7 @@ import java.util.concurrent.TimeUnit;
  * screen says "around 2 AM", never "sharp at 2:00".
  *
  * Either way the trigger only starts the worker; the worker itself
- * copies the stored snapshot to the phone and Drive. Exact alarms
+ * copies the stored snapshot to the phone. Exact alarms
  * do not survive a reboot, so BackupBootReceiver re-arms them.
  */
 public final class BackupScheduler {

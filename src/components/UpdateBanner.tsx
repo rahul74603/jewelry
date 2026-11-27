@@ -66,9 +66,7 @@ function UpdateFlow({
         setStage("need-permission");
       }
     } catch {
-      setError(
-        "Download nahi hua — internet check karo aur dobara try karo.",
-      );
+      setError("Download nahi hua — dobara try karo.");
       setStage("error");
     }
   };

@@ -13,14 +13,13 @@
  * once a day on app open until it succeeds.
  *
  * Offline-first: the local backup never waits for the upload. A
- * failed upload only marks the server copy pending (see
- * src/lib/cloudBackup.ts, the Drive sibling of this module — same
- * patterns: injectable store + injectable fetch for tests, never
- * throws on the non-admin paths, Hindi-friendly reason strings).
- * The Worker side is the same Cloudflare Worker that serves the
- * license server (see src/lib/licenseServer.ts) — the base URL is
- * already configured in both builds, no new env vars, no admin
- * token on the shopkeeper paths.
+ * failed upload only marks the server copy pending (same patterns
+ * as the old Drive module: injectable store + injectable fetch for
+ * tests, never throws on the non-admin paths, Hindi-friendly reason
+ * strings). The Worker side is the same Cloudflare Worker that
+ * serves the license server (see src/lib/licenseServer.ts) — the
+ * base URL is already configured in both builds, no new env vars,
+ * no admin token on the shopkeeper paths.
  *
  * (First designed for R2, but Cloudflare requires a payment card on
  * file even for the $0 R2 plan, and the developer has RuPay only —
@@ -78,7 +77,7 @@ export function serverBackupKey(deviceId: string, year: number): string {
   return `backups/${wireDeviceId(deviceId)}/aurum-backup-${year}.json`;
 }
 
-/** In-memory store for tests (mirrors cloudBackup.ts `memoryCloudStore`). */
+/** In-memory store for tests (mirrors kvStore.ts `memoryKvStore`). */
 export function memoryServerBackupStore(): {
   store: PrefsStore;
   map: Map<string, string>;

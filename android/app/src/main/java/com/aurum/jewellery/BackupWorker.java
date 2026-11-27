@@ -23,8 +23,7 @@ import java.util.TimeZone;
 import org.json.JSONObject;
 
 /**
- * Copies the stored backup snapshot to the phone and Google Drive
- * at 02:00 AM.
+ * Copies the stored backup snapshot to the phone at 02:00 AM.
  *
  * The snapshot is the full checksummed backup file the TS side
  * wrote on the last app open (app files dir /
@@ -39,17 +38,17 @@ import org.json.JSONObject;
  * - No snapshot yet → skip quietly (success, no retry, no spam).
  *   The app simply hasn't been opened since auto-backup was
  *   enabled; the next app open writes the snapshot.
- * - No Drive folder → phone-only is fine, not an error ("partial"
- *   only when a Drive folder exists and its write failed).
  * - Local write failed → the run failed; a transient failure
  *   retries later the same day (max 3 attempts).
- * - Drive write failed → the local copy is still safe; a transient
- *   failure retries later the same day (max 3), a permanent one
- *   (permission revoked, folder gone) does not — Settings shows the
- *   reason in the morning.
  * - The worker never crashes the schedule: any unexpected exception
  *   records a failure and returns success, so tomorrow's 02:00 run
  *   still happens.
+ *
+ * (Google Drive backup was removed in v1.0.52 — the worker used to
+ * copy the snapshot to a connected Drive folder too. That copy, its
+ * "partial" status and DriveBackup.java are gone; the automatic
+ * cloud backup now uploads the same file from the app on the next
+ * open, see src/lib/serverBackup.ts.)
  */
 public class BackupWorker extends Worker {
 
@@ -66,7 +65,7 @@ public class BackupWorker extends Worker {
             File snapshot = new File(context.getFilesDir(), AutoBackupStore.SNAPSHOT_PATH);
             if (!snapshot.exists()) {
                 AutoBackupStore.setLastRun(context, "no-snapshot", nowIso(),
-                    "", "", "", false, "no-snapshot");
+                    "", "", "", "no-snapshot");
                 return Result.success();
             }
             byte[] bytes = readBytes(snapshot);
@@ -87,42 +86,21 @@ public class BackupWorker extends Worker {
                 localError = "local-write-failed";
             }
 
-            String driveUri = AutoBackupStore.driveFolderUri(context);
-            boolean driveOk = false;
-            String driveError = "";
-            if (driveUri == null || driveUri.isEmpty()) {
-                driveError = "not-connected";
-            } else {
-                String result = DriveBackup.writeToDriveFolder(
-                    context, driveUri, filename, bytes);
-                if ("ok".equals(result)) {
-                    driveOk = true;
-                } else {
-                    driveError = result;
-                }
-            }
-
             String status;
             String error;
             if (!localOk) {
                 status = "failed";
                 error = localError;
-            } else if (!driveUri.isEmpty() && !driveOk) {
-                status = "partial";
-                error = driveError;
             } else {
                 status = "success";
                 error = "";
             }
             AutoBackupStore.setLastRun(context, status, nowIso(), filename,
-                shopName, countsJson, driveOk, error);
+                shopName, countsJson, error);
 
             // Transient failure → retry later the same day (max 3).
-            // A missing Drive folder or a revoked permission never
-            // retries: retrying cannot fix those.
-            String retryError = !localOk ? localError : driveError;
             if (!"success".equals(status)
-                    && AutoBackupStore.isTransientError(retryError)
+                    && AutoBackupStore.isTransientError(localError)
                     && AutoBackupStore.noteRetry(context)) {
                 return Result.retry();
             }
@@ -130,7 +108,7 @@ public class BackupWorker extends Worker {
         } catch (Exception e) {
             try {
                 AutoBackupStore.setLastRun(getApplicationContext(), "failed",
-                    nowIso(), "", "", "", false, "write-failed");
+                    nowIso(), "", "", "", "write-failed");
             } catch (Exception ignored) {
             }
             return Result.success();

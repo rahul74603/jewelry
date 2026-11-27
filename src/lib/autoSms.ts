@@ -47,10 +47,7 @@ import type {
   Loan,
   Workspace,
 } from "../../functions/src/core/model";
-import {
-  localCloudStore,
-  type CloudStore,
-} from "./cloudBackup";
+import { localKvStore, type KvStore } from "./kvStore";
 
 export type SmsScheduleMode = "exact" | "periodic";
 
@@ -157,7 +154,7 @@ export function smsFailureText(reason: string | null | undefined): string {
 }
 
 export function loadAutoSmsSettings(
-  store: CloudStore = localCloudStore,
+  store: KvStore = localKvStore,
 ): AutoSmsSettings {
   try {
     const parsed: unknown = JSON.parse(store.get(SETTINGS_KEY) ?? "null");
@@ -171,7 +168,7 @@ export function loadAutoSmsSettings(
 
 export function saveAutoSmsSettings(
   settings: AutoSmsSettings,
-  store: CloudStore = localCloudStore,
+  store: KvStore = localKvStore,
 ): void {
   store.set(SETTINGS_KEY, JSON.stringify(settings));
 }
@@ -249,7 +246,7 @@ export type PrepareAutoSmsResult =
 export async function prepareAutoSms(
   data: Workspace,
   native: SmsReminderNative = smsReminder,
-  store: CloudStore = localCloudStore,
+  store: KvStore = localKvStore,
 ): Promise<PrepareAutoSmsResult> {
   if (!loadAutoSmsSettings(store).enabled)
     return { prepared: false, reason: "disabled" };

@@ -15,18 +15,15 @@ import java.util.TimeZone;
  * store, which a native worker cannot read. So the JS side builds
  * the full checksummed backup file on every app open and saves it
  * as a snapshot the worker can read (app files dir /
- * auto-backup/snapshot.json), and hands the connected Drive folder
- * URI to the plugin, which stores it here — native cannot read
- * WebView localStorage, where the folder URI lives.
+ * auto-backup/snapshot.json).
  *
  * The worker records each run's result here (lastRunAt, status,
- * filename, Drive outcome); the TS side syncs that into
+ * filename, last error); the TS side syncs that into
  * localStorage on the next app open so the Dashboard backup
  * reminder clears.
  *
  * Retry rule: a failed run retries later the same day, at most 3
- * times (transient failures only — a missing Drive folder or a
- * revoked permission never retries). A missing snapshot skips
+ * times (transient failures only). A missing snapshot skips
  * quietly: the app simply hasn't been opened since enabling.
  */
 public final class AutoBackupStore {
@@ -86,20 +83,11 @@ public final class AutoBackupStore {
         prefs(context).edit().putString("mode", mode).apply();
     }
 
-    /** Persisted SAF tree URI of the connected Drive folder ("" when none). */
-    public static String driveFolderUri(Context context) {
-        return prefs(context).getString("drive_folder_uri", "");
-    }
-
-    public static void setDriveFolderUri(Context context, String uri) {
-        prefs(context).edit().putString("drive_folder_uri", uri == null ? "" : uri).apply();
-    }
-
     public static String lastRunAt(Context context) {
         return prefs(context).getString("last_run_at", "");
     }
 
-    /** "success" | "partial" | "failed" | "no-snapshot", "" when never run. */
+    /** "success" | "failed" | "no-snapshot", "" when never run. */
     public static String lastStatus(Context context) {
         return prefs(context).getString("last_status", "");
     }
@@ -117,11 +105,6 @@ public final class AutoBackupStore {
         return prefs(context).getString("last_counts_json", "");
     }
 
-    /** True when the Drive copy of the last run succeeded. */
-    public static boolean driveOk(Context context) {
-        return prefs(context).getBoolean("drive_ok", false);
-    }
-
     /** Reason code of the last failure ("" when the last run succeeded). */
     public static String lastError(Context context) {
         return prefs(context).getString("last_error", "");
@@ -135,7 +118,6 @@ public final class AutoBackupStore {
             String filename,
             String shopName,
             String countsJson,
-            boolean driveOk,
             String error) {
         SharedPreferences.Editor e = prefs(context).edit();
         e.putString("last_status", status);
@@ -143,9 +125,8 @@ public final class AutoBackupStore {
         e.putString("last_filename", filename == null ? "" : filename);
         e.putString("last_shop_name", shopName == null ? "" : shopName);
         e.putString("last_counts_json", countsJson == null ? "" : countsJson);
-        e.putBoolean("drive_ok", driveOk);
         e.putString("last_error", error == null ? "" : error);
-        if ("success".equals(status) || "partial".equals(status)) {
+        if ("success".equals(status)) {
             e.remove("retries_day");
             e.remove("retries_count");
         }
@@ -174,8 +155,6 @@ public final class AutoBackupStore {
     /** True for failures worth retrying later the same day. */
     public static boolean isTransientError(String error) {
         return "local-write-failed".equals(error)
-            || "write-failed".equals(error)
-            || "could-not-create".equals(error)
-            || "could-not-replace".equals(error);
+            || "write-failed".equals(error);
     }
 }

@@ -9,20 +9,17 @@
  * in place every day, so there is always exactly one current file and
  * old years stay listed separately. No Gmail backup — the shopkeeper
  * downloads the file in one tap (Backup now) or shares it manually
- * (WhatsApp) from the Share sheet. The same file is ALSO written to
- * a Google Drive folder the shopkeeper picks once — see
- * src/lib/cloudBackup.ts (Storage Access Framework, no sign-in, no
- * OAuth). The local copy is always kept; a failed cloud upload only
- * marks the cloud copy pending and retries with the next backup.
+ * (WhatsApp) from the Share sheet. The same file is ALSO uploaded to
+ * our own automatic cloud backup (see src/lib/serverBackup.ts) — no
+ * Google Drive, no folder pick (Drive backup was removed in v1.0.52).
  *
  * Backup runs daily when you open the app (like MediSmart) — and,
  * optionally, automatically every night at 02:00 via the native
  * scheduler (see src/lib/autoBackup.ts): the TS side hands a fresh
  * snapshot to the native worker, which writes the same yearly file
- * to Documents/AurumBackup and to the connected Drive folder.
- * 02:00 sharp is not guaranteed (Doze / battery saving can shift
- * it, like the 10:00 AM SMS) — the Settings screen says "around
- * 2 AM".
+ * to Documents/AurumBackup. 02:00 sharp is not guaranteed (Doze /
+ * battery saving can shift it, like the 10:00 AM SMS) — the Settings
+ * screen says "around 2 AM".
  *
  * Restore is real: pick a file → validateBackup() (format, version,
  * SHA-256 checksum, counts) → confirm → perform("restore", data)
@@ -254,8 +251,8 @@ export function recordBackupHistory(
 }
 
 /** Minimal key/value store for backup state (localStorage by
- * default; tests pass a memory store). Structural — the CloudStore
- * in cloudBackup.ts satisfies it. */
+ * default; tests pass a memory store). Structural — the KvStore
+ * in kvStore.ts satisfies it. */
 export type PrefsStore = {
   get(key: string): string | null;
   set(key: string, value: string): void;

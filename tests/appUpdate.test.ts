@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { Capacitor } from "@capacitor/core";
 import {
   compareVersions,
   checkLatest,
@@ -6,8 +7,26 @@ import {
   shouldCheckUpdate,
   markUpdateChecked,
   wireDeviceId,
+  downloadApk,
+  UPDATE_APK_FILENAME,
   UPDATE_CHECK_KEY,
 } from "../src/lib/appUpdate";
+
+// The native download path goes through the Capacitor Filesystem
+// plugin — mock it so the tests never touch native code.
+const fsMocks = vi.hoisted(() => ({
+  downloadFile: vi.fn(),
+  addListener: vi.fn(),
+  remove: vi.fn(),
+}));
+
+vi.mock("@capacitor/filesystem", () => ({
+  Filesystem: {
+    downloadFile: fsMocks.downloadFile,
+    addListener: fsMocks.addListener,
+  },
+  Directory: { Cache: "CACHE" },
+}));
 
 const BASE = "https://aurum-license-server.test.workers.dev";
 const DEVICE_ID = "ABCD-1234-EF01";
@@ -304,5 +323,100 @@ describe("once-a-day update check cache", () => {
     expect(shouldCheckUpdate()).toBe(false);
     markUpdateChecked(Date.now() - 25 * 60 * 60 * 1000);
     expect(shouldCheckUpdate()).toBe(true);
+  });
+});
+
+describe("downloadApk (v1.0.52: no WebView fetch — GitHub sends no CORS headers)", () => {
+  const APK_URL =
+    "https://github.com/rahul74603/jewelry/releases/download/phone-46022154647-1/Aurum-Customer-arm64.apk";
+
+  let fetchFn: ReturnType<typeof vi.fn>;
+  let platformSpy: ReturnType<typeof vi.spyOn>;
+  let progressListener:
+    | ((s: { url: string; bytes: number; contentLength: number }) => void)
+    | null;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    progressListener = null;
+    fetchFn = vi.fn(async () => {
+      throw Error("fetch must not be called for the APK download");
+    });
+    vi.stubGlobal("fetch", fetchFn);
+    platformSpy = vi.spyOn(Capacitor, "getPlatform");
+    fsMocks.downloadFile.mockResolvedValue({ path: UPDATE_APK_FILENAME });
+    fsMocks.addListener.mockImplementation(async (_event, cb) => {
+      progressListener = cb as typeof progressListener;
+      return { remove: fsMocks.remove };
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("on Android downloads natively to the cache file and never fetches", async () => {
+    platformSpy.mockReturnValue("android");
+    const seen: number[] = [];
+    await downloadApk(APK_URL, (p) => void seen.push(p));
+    expect(fsMocks.addListener).toHaveBeenCalledWith(
+      "progress",
+      expect.any(Function),
+    );
+    expect(fsMocks.downloadFile).toHaveBeenCalledWith({
+      url: APK_URL,
+      path: UPDATE_APK_FILENAME,
+      directory: "CACHE",
+      progress: true,
+    });
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(fsMocks.remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("on Android reports 0–100 progress from native events, -1 when the size is unknown", async () => {
+    platformSpy.mockReturnValue("android");
+    fsMocks.downloadFile.mockImplementation(async () => {
+      progressListener?.({ url: APK_URL, bytes: 512, contentLength: 1024 });
+      progressListener?.({ url: APK_URL, bytes: 1024, contentLength: 1024 });
+      progressListener?.({ url: APK_URL, bytes: 2048, contentLength: 0 });
+      return { path: UPDATE_APK_FILENAME };
+    });
+    const seen: number[] = [];
+    await downloadApk(APK_URL, (p) => void seen.push(p));
+    expect(seen).toEqual([50, 100, -1]);
+  });
+
+  it("on Android a failed download rejects cleanly and still removes the listener", async () => {
+    platformSpy.mockReturnValue("android");
+    fsMocks.downloadFile.mockRejectedValueOnce(Error("network down"));
+    await expect(downloadApk(APK_URL)).rejects.toThrow("network down");
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(fsMocks.remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("on the web triggers a plain anchor download to the APK URL and never fetches bytes", async () => {
+    platformSpy.mockReturnValue("web");
+    const anchor = {
+      href: "",
+      download: "",
+      click: vi.fn(),
+      remove: vi.fn(),
+    };
+    const createElement = vi.fn(() => anchor);
+    const appendChild = vi.fn();
+    vi.stubGlobal("document", {
+      createElement,
+      body: { appendChild },
+    });
+    await downloadApk(APK_URL);
+    expect(createElement).toHaveBeenCalledWith("a");
+    expect(anchor.href).toBe(APK_URL);
+    expect(anchor.download).toBe(UPDATE_APK_FILENAME);
+    expect(appendChild).toHaveBeenCalledWith(anchor);
+    expect(anchor.click).toHaveBeenCalledTimes(1);
+    expect(anchor.remove).toHaveBeenCalledTimes(1);
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(fsMocks.downloadFile).not.toHaveBeenCalled();
   });
 });

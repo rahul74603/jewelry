@@ -11,10 +11,11 @@
  * native worker can read: Capacitor Filesystem Directory.Data, which
  * on Android is the app's files dir (getFilesDir()). The native
  * trigger fires at 02:00 (Asia/Kolkata) and the worker copies that
- * snapshot verbatim to Documents/AurumBackup/<yearly file> and, when
- * a Drive folder is connected, into that folder too (persisted SAF
- * URI, handed to native on every app open — native cannot read
- * WebView localStorage, where the folder URI lives).
+ * snapshot verbatim to Documents/AurumBackup/<yearly file>. The
+ * automatic cloud backup (src/lib/serverBackup.ts) uploads that
+ * same file to our own server on the next app open — no Google
+ * Drive, no folder pick, no setup (Drive backup was removed in
+ * v1.0.52).
  *
  * The 02:00 trigger is an exact alarm (AlarmManager
  * setExactAndAllowWhileIdle) when the phone allows exact alarms, and
@@ -29,11 +30,11 @@
  * reminder clears — native cannot write WebView localStorage.
  *
  * Failure rules: a missing snapshot skips quietly (no crash, no
- * spam — the app simply hasn't been opened since enabling). No
- * Drive folder means phone-only, not an error. A failed local write
- * or Drive write retries later the same day (max 3 attempts, native
- * side); the local copy is the safety net, and Settings shows the
- * last run's status so a Drive failure is visible in the morning.
+ * spam — the app simply hasn't been opened since enabling). A
+ * failed local write retries later the same day (max 3 attempts,
+ * native side); the local copy is the safety net, and Settings
+ * shows the last run's status so a failure is visible in the
+ * morning.
  */
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import {
@@ -47,11 +48,7 @@ import {
   type BackupCounts,
   type PrefsStore,
 } from "./backup";
-import {
-  loadCloudFolder,
-  localCloudStore,
-  type CloudStore,
-} from "./cloudBackup";
+import { localKvStore, type KvStore } from "./kvStore";
 import {
   stableJson,
   type Workspace,
@@ -60,11 +57,7 @@ import {
 export type AutoBackupMode = "exact" | "periodic";
 
 /** Last-run status, as the native worker recorded it. */
-export type AutoBackupRunStatus =
-  | "success"
-  | "partial"
-  | "failed"
-  | "no-snapshot";
+export type AutoBackupRunStatus = "success" | "failed" | "no-snapshot";
 
 export type AutoBackupStatus = {
   enabled: boolean;
@@ -76,15 +69,15 @@ export type AutoBackupStatus = {
   lastShopName: string | null;
   /** Counts from the snapshot the worker wrote, as JSON (or ""). */
   lastCountsJson: string;
-  /** True when the Drive copy of the last run succeeded. */
-  driveOk: boolean;
   lastError: string | null;
 };
 
 export interface BackupSchedulerNative {
-  scheduleBackup(options: {
-    driveFolderUri: string;
-  }): Promise<{ scheduled: boolean; mode: string; exactAllowed: boolean }>;
+  scheduleBackup(): Promise<{
+    scheduled: boolean;
+    mode: string;
+    exactAllowed: boolean;
+  }>;
   cancelBackup(): Promise<{ cancelled: boolean }>;
   getStatus(): Promise<{
     enabled: boolean;
@@ -95,12 +88,9 @@ export interface BackupSchedulerNative {
     lastFilename: string;
     lastShopName: string;
     lastCountsJson: string;
-    driveOk: boolean;
     lastError: string;
   }>;
-  runNow(options: {
-    driveFolderUri: string;
-  }): Promise<{ started: boolean }>;
+  runNow(): Promise<{ started: boolean }>;
   openExactAlarmSettings(): Promise<void>;
 }
 
@@ -132,18 +122,8 @@ export function autoBackupFailureText(
       return "No backup snapshot yet — open the app once";
     case "local-write-failed":
       return "Could not write to the AurumBackup folder — storage check karen";
-    case "permission-revoked":
-      return "Drive permission lost — pick the folder again";
-    case "folder-missing":
-      return "Drive folder is gone — pick a folder again";
-    case "could-not-create":
-      return "Drive could not create the backup file";
-    case "could-not-replace":
-      return "Drive could not replace the old backup file";
     case "write-failed":
-      return "Drive write failed";
-    case "not-connected":
-      return "Drive folder not connected — phone-only backup";
+      return "Automatic backup failed — dobara try hoga";
     default:
       return reason ? reason : "Automatic backup failed";
   }
@@ -213,7 +193,6 @@ export async function loadAutoBackupStatus(
     const s = await native.getStatus();
     const lastStatus: AutoBackupStatus["lastStatus"] =
       s.lastStatus === "success" ||
-      s.lastStatus === "partial" ||
       s.lastStatus === "failed" ||
       s.lastStatus === "no-snapshot"
         ? s.lastStatus
@@ -232,7 +211,6 @@ export async function loadAutoBackupStatus(
       lastFilename: s.lastFilename || null,
       lastShopName: s.lastShopName || null,
       lastCountsJson: s.lastCountsJson || "",
-      driveOk: s.driveOk === true,
       lastError: s.lastError || null,
     };
   } catch {
@@ -243,19 +221,15 @@ export async function loadAutoBackupStatus(
 /**
  * Sync a native 02:00 run into localStorage (last-backup date +
  * history), so the Dashboard reminder clears. Only runs that
- * actually wrote the local file count ("success" / "partial"); a
- * failed run or a skipped run changes nothing. Returns true when a
- * run was recorded.
+ * actually wrote the local file count ("success"); a failed run
+ * or a skipped run changes nothing. Returns true when a run was
+ * recorded.
  */
 export function syncAutoBackupRun(
   status: AutoBackupStatus,
   store?: PrefsStore,
 ): boolean {
-  if (
-    status.lastStatus !== "success" &&
-    status.lastStatus !== "partial"
-  )
-    return false;
+  if (status.lastStatus !== "success") return false;
   if (!status.lastRunAt) return false;
   const last = loadLastBackupAt(store);
   if (last && last >= status.lastRunAt) return false;
@@ -299,7 +273,6 @@ export async function prepareAutoBackup(
   data: Workspace,
   native: BackupSchedulerNative = backupScheduler,
   prefsStore?: PrefsStore,
-  cloudStore: CloudStore = localCloudStore,
   writeSnapshot: SnapshotWriter = defaultSnapshotWriter,
 ): Promise<PrepareAutoBackupResult> {
   if (!loadBackupPreferences(prefsStore).autoBackup)
@@ -325,15 +298,11 @@ export async function prepareAutoBackup(
     const status = await loadAutoBackupStatus(native);
     let synced = false;
     if (status) synced = syncAutoBackupRun(status, prefsStore);
-    // 3. Self-heal: if native lost the schedule, re-arm it (and hand
-    // it the current Drive folder, which native cannot read itself).
+    // 3. Self-heal: if native lost the schedule, re-arm it.
     let mode: AutoBackupMode = status?.mode ?? "periodic";
     let exactAllowed = status?.exactAllowed ?? false;
     if (status && !status.enabled) {
-      const folder = loadCloudFolder(cloudStore);
-      const res = await native.scheduleBackup({
-        driveFolderUri: folder?.uri ?? "",
-      });
+      const res = await native.scheduleBackup();
       mode = res.mode === "exact" ? "exact" : "periodic";
       exactAllowed = res.exactAllowed;
     }
@@ -352,7 +321,6 @@ export async function prepareAutoBackup(
 /** Schedule the 02:00 trigger (Settings toggle ON). Returns null when unavailable. */
 export async function scheduleAutoBackup(
   native: BackupSchedulerNative = backupScheduler,
-  cloudStore: CloudStore = localCloudStore,
 ): Promise<{
   scheduled: boolean;
   mode: AutoBackupMode;
@@ -360,10 +328,7 @@ export async function scheduleAutoBackup(
 } | null> {
   if (!nativeUsable(native)) return null;
   try {
-    const folder = loadCloudFolder(cloudStore);
-    const res = await native.scheduleBackup({
-      driveFolderUri: folder?.uri ?? "",
-    });
+    const res = await native.scheduleBackup();
     return {
       scheduled: res.scheduled,
       mode: res.mode === "exact" ? "exact" : "periodic",
@@ -389,12 +354,10 @@ export async function cancelAutoBackup(
 /** Run the backup worker right now (Settings → "Test now"). */
 export async function runAutoBackupNow(
   native: BackupSchedulerNative = backupScheduler,
-  cloudStore: CloudStore = localCloudStore,
 ): Promise<boolean> {
   if (!nativeUsable(native)) return false;
   try {
-    const folder = loadCloudFolder(cloudStore);
-    const res = await native.runNow({ driveFolderUri: folder?.uri ?? "" });
+    const res = await native.runNow();
     return res.started === true;
   } catch {
     return false;

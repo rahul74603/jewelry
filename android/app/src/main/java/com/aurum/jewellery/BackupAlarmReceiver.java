@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * Fires at 02:00 AM from the exact alarm: re-arm tomorrow's alarm
  * first (so a crash later cannot lose the next day), then start the
- * worker, which copies the stored snapshot to the phone and Drive.
+ * worker, which copies the stored snapshot to the phone.
  */
 public class BackupAlarmReceiver extends BroadcastReceiver {
     @Override

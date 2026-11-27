@@ -29,44 +29,26 @@ MediSmart-v2-style backup and activation, adapted for Aurum. Branch:
   today’s backup is pending; the toggle is in Settings). An exact 02:00
   backup needs a native Android WorkManager scheduler plus a
   battery-optimisation exemption. That is **not built**.
-- **Google Drive cloud backup (automatic).** Settings → “Google
-  Drive cloud backup” → “Connect Google Drive folder” opens the
-  Android folder picker once; the shopkeeper picks a folder in
-  Google Drive (needs the Google Drive app on the phone). After
-  that, every backup also writes the same yearly file into that
-  Drive folder (overwritten in place), and the local copy in
-  `Documents/AurumBackup/` is always kept too — so the backup
-  survives a lost, changed or reset phone. No Google sign-in, no
-  Google Cloud project, no OAuth client: the folder is picked
-  through the Storage Access Framework and the permission is kept
-  by the native `DriveFolder` plugin
-  (`android/app/src/main/java/com/aurum/jewellery/DriveFolderPlugin.java`,
-  `src/lib/cloudBackup.ts`). The picker is opened with My Drive as
-  the initial location (the Drive provider's roots are queried for
-  the "My Drive" root; if that query comes back empty — it can do
-  so even with Drive installed, when Drive was never opened or
-  signed in — the fallback is My Drive's well-known "root"
-  document, and the picker still opens so the shopkeeper can reach
-  Drive from its drawer menu; a missing root is never read as
-  "Drive is missing"). A folder outside Google Drive is rejected
-  with a clear message, so a local folder can never be saved as
-  the "Drive" folder and silently make cloud backup phone-only.
-  The "last cloud backup" date belongs to the currently connected
-  folder — changing the folder clears it, so it never shows an
-  upload that went to the previous folder — and a failed upload
-  shows its specific reason in Settings (could not create the
-  file, write failed, permission lost), instead of only "pending".
-  SAF was chosen because an Android
-  OAuth client is tied to the package name + SHA-1 signing
-  fingerprint, and CI builds are DEBUG APKs with a disposable debug
-  signing key, so no registered OAuth client could ever match them
-  (the Drive REST API fails with `UnregisteredOnApiConsole` for
-  exactly this reason). If the folder is deleted in Drive or its
-  permission is revoked, the next backup marks the cloud copy
-  pending and Settings asks to pick the folder again; the local
-  backup never fails because the cloud failed. Restore can read the
-  file back from Drive (“Restore from Google Drive”) — it goes
-  through the same validation as a local file.
+- **Automatic cloud backup (no Google Drive, no setup).** The same
+  yearly file is also uploaded to Aurum's own cloud backup — a
+  Cloudflare D1 table on the same license server that serves
+  block/unlock (see `src/lib/serverBackup.ts`, Worker
+  `~/workspace/aurum-license-server/`). No folder to pick, no
+  sign-in, no account: after the 02:00 AM local backup run is
+  synced on the next app open, the app uploads the file by itself
+  (and retries once a day on app open if the upload fails). The
+  local copy in `Documents/AurumBackup/` is always kept too — the
+  cloud upload can never fail the local backup. If the phone is
+  replaced or the app is reinstalled (Device ID changes), the
+  Master app's "Backup transfer" moves the cloud backup to the new
+  Device ID. Restore reads it back with "Cloud backup se restore"
+  in Settings — it goes through the same validation as a local
+  file. (Google Drive backup was removed in v1.0.52: no Drive
+  folder pick, no Drive upload, no "Restore from Google Drive". The
+  old Drive code — `src/lib/cloudBackup.ts`, the native
+  `DriveFolder` plugin and the 02:00 worker's Drive copy — is gone;
+  the `DriveFolderPlugin.java` file is still in the repo but nothing
+  calls it.)
 - **No Gmail backup.** Gmail cannot take an attachment via a `mailto:`
   link, so Gmail is not offered. To keep a second copy elsewhere,
   share the file to WhatsApp yourself from the Share sheet (the
@@ -80,9 +62,8 @@ MediSmart-v2-style backup and activation, adapted for Aurum. Branch:
   handler in `functions/src/server/workspace.ts` (which also rebuilds
   voided/converted flags and bumps document counters past the highest
   restored number). A file that fails validation can never wipe the
-  shop. The Drive copy restores the same way — “Restore from Google
-  Drive” downloads the yearly file from the connected folder and
-  validates it first.
+  shop. The cloud copy restores the same way — "Cloud backup se restore"
+  downloads the yearly file from the server and validates it first.
 - **Shop details:** the shopkeeper enters shop details in Settings →
   “Shop profile” (the existing form). The backup includes that profile.
   No duplicate shop-details form was added.
@@ -148,15 +129,16 @@ key  = SHA256(code      | salt | KEY)    first 8 chars, uppercase
 ## Tests
 
 `tests/backup.test.ts` (8 tests), `tests/restore.test.ts` (3 tests),
-`tests/cloudBackup.test.ts` (26 tests) and
+`tests/serverBackup.test.ts` (automatic cloud backup: upload,
+latest, transfer, chunking, retry) and
 `tests/offlineActivation.test.ts`
 (9 tests): backup creation/validation, tamper rejection, daily-due
 logic, one-file-per-year naming and per-year history, the
 6-collection shape; whole-workspace restore (valid backup round-trips,
-bad payloads throw, voided flags survive); cloud backup (folder pick,
-yearly-file upload, pending/retry on failure, permission-lost
-handling, restore from Drive, disconnect, rejection of a folder
-outside Drive); code/key derivation,
+bad payloads throw, voided flags survive); automatic cloud backup
+(upload + download round-trip, per-device isolation, transfer to a
+new Device ID, chunked large backups, pending/retry on failure);
+code/key derivation,
 verification, wrong-key/secret rejection, timing-safe compare, the
 confirmed developer WhatsApp number, the master-app-key → user-app
 round-trip (two-app flow), and the licensed-flag helpers being safe

@@ -10,7 +10,7 @@ import {
   loanSummary,
   todayDay,
 } from "../functions/src/core/loans";
-import { memoryCloudStore } from "../src/lib/cloudBackup";
+import { memoryKvStore } from "../src/lib/kvStore";
 import {
   buildReminderItems,
   checkSmsPermission,
@@ -247,7 +247,7 @@ describe("sentTodayLoanIds", () => {
 
 describe("auto-SMS settings", () => {
   it("defaults OFF and round-trips", () => {
-    const { store } = memoryCloudStore();
+    const { store } = memoryKvStore();
     expect(loadAutoSmsSettings(store)).toEqual({ enabled: false });
     saveAutoSmsSettings({ enabled: true }, store);
     expect(loadAutoSmsSettings(store)).toEqual({ enabled: true });
@@ -255,7 +255,7 @@ describe("auto-SMS settings", () => {
     expect(loadAutoSmsSettings(store)).toEqual({ enabled: false });
   });
   it("a corrupt setting stays OFF", () => {
-    const { store, map } = memoryCloudStore();
+    const { store, map } = memoryKvStore();
     map.set("aurum:sms:auto", "{not json");
     expect(loadAutoSmsSettings(store)).toEqual({ enabled: false });
   });
@@ -263,7 +263,7 @@ describe("auto-SMS settings", () => {
 
 describe("prepareAutoSms", () => {
   it("does nothing when disabled", async () => {
-    const { store } = memoryCloudStore();
+    const { store } = memoryKvStore();
     const native = fakeNative({
       scheduleReminders: async () => {
         throw Error("must not be called");
@@ -273,7 +273,7 @@ describe("prepareAutoSms", () => {
     expect(result).toEqual({ prepared: false, reason: "disabled" });
   });
   it("hands the due payload to the native scheduler when enabled", async () => {
-    const { store } = memoryCloudStore();
+    const { store } = memoryKvStore();
     saveAutoSmsSettings({ enabled: true }, store);
     let seen: { items: unknown; preparedDay: string } | null = null;
     const native = fakeNative({
@@ -300,7 +300,7 @@ describe("prepareAutoSms", () => {
     ).toEqual(["loan-overdue", "loan-soon"]);
   });
   it("reports a missing SMS permission instead of throwing", async () => {
-    const { store } = memoryCloudStore();
+    const { store } = memoryKvStore();
     saveAutoSmsSettings({ enabled: true }, store);
     const native = fakeNative({
       scheduleReminders: async () => {
@@ -311,7 +311,7 @@ describe("prepareAutoSms", () => {
     expect(result).toEqual({ prepared: false, reason: "no-permission" });
   });
   it("reports a generic scheduler failure instead of throwing", async () => {
-    const { store } = memoryCloudStore();
+    const { store } = memoryKvStore();
     saveAutoSmsSettings({ enabled: true }, store);
     const native = fakeNative({
       scheduleReminders: async () => {

@@ -259,7 +259,18 @@ export async function maybeCheckLatest(
 // android/.../com/aurum/jewellery/AppUpdatePlugin.java.
 // ---------------------------------------------------------------------------
 
-const native = Capacitor.getPlatform() === "android";
+/**
+ * True on the Android app. Read live on every call (not cached at
+ * import) — Capacitor.getPlatform() is stable at runtime, and a
+ * live read lets tests drive both branches by stubbing it.
+ */
+function isNative(): boolean {
+  try {
+    return Capacitor.getPlatform() === "android";
+  } catch {
+    return false;
+  }
+}
 
 const appUpdatePlugin = registerPlugin<{
   getPrimaryAbi: () => Promise<{ abi: string }>;
@@ -271,7 +282,7 @@ const appUpdatePlugin = registerPlugin<{
 /** This phone's primary ABI, e.g. "arm64-v8a" — "" on the web. */
 export async function getPrimaryAbi(): Promise<string> {
   try {
-    if (!native) return "";
+    if (!isNative()) return "";
     const out = await appUpdatePlugin.getPrimaryAbi();
     return typeof out?.abi === "string" ? out.abi.trim() : "";
   } catch {
@@ -286,7 +297,7 @@ export async function getPrimaryAbi(): Promise<string> {
  */
 export async function canInstallPackages(): Promise<boolean> {
   try {
-    if (!native) return false;
+    if (!isNative()) return false;
     const out = await appUpdatePlugin.canInstallPackages();
     return out?.canInstall === true;
   } catch {
@@ -297,7 +308,7 @@ export async function canInstallPackages(): Promise<boolean> {
 /** Opens this app's "Install unknown apps" settings page. */
 export async function openInstallSettings(): Promise<void> {
   try {
-    if (native) await appUpdatePlugin.openInstallSettings();
+    if (isNative()) await appUpdatePlugin.openInstallSettings();
   } catch {
     // Best effort — the shopkeeper can open Settings by hand.
   }
@@ -313,7 +324,7 @@ export async function installApk(
   fileName = UPDATE_APK_FILENAME,
 ): Promise<boolean> {
   try {
-    if (!native) return false;
+    if (!isNative()) return false;
     const out = await appUpdatePlugin.installApk({ fileName });
     return out?.started === true;
   } catch {
@@ -322,83 +333,77 @@ export async function installApk(
 }
 
 export function isAndroidApp(): boolean {
-  return native;
-}
-
-function arrayBufferToBase64(buf: ArrayBuffer): string {
-  const bytes = new Uint8Array(buf);
-  const CHUNK = 0x8000;
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-  }
-  return btoa(binary);
+  return isNative();
 }
 
 /**
  * Download the update APK and save it as aurum-update.apk in
  * the app cache dir (Directory.Cache — the FileProvider already
- * serves cache-path, so the installer can read it). Reports
- * 0–100 progress when the server sends a content-length, else
- * calls onProgress(-1) while downloading. On the web build
- * there is no cache dir the installer can read, so it falls
- * back to a plain browser download. Throws on download/write
- * failure — the caller shows a plain Hindi retry message.
+ * serves cache-path, so the installer can read it).
+ *
+ * Native (Android): Capacitor Filesystem.downloadFile — a NATIVE
+ * HttpURLConnection download, NOT a WebView fetch(). GitHub
+ * release downloads send no Access-Control-Allow-Origin header,
+ * so a WebView fetch() of the APK is blocked by CORS (the 1.0.51
+ * failure: banner up, download dead, "internet check karo" on a
+ * phone with working 5G). The native download is not subject to
+ * CORS and follows the github.com 302 to the release asset. It
+ * streams straight to the cache file, so a 4 MB APK never sits in
+ * JS memory as base64.
+ *
+ * Web build: a plain anchor download straight to apkUrl — no
+ * fetch of the bytes (same CORS problem). The browser saves the
+ * APK; there is no installer to open here.
+ *
+ * Reports 0–100 progress when the total size is known, else -1
+ * while downloading. Throws on download failure — the caller
+ * shows a plain Hindi retry message.
+ *
+ * NOTE: Filesystem.downloadFile is deprecated in @capacitor/
+ * filesystem 7.1 (it points at @capacitor/file-transfer as the
+ * successor) but is present and working in the installed 7.1.9;
+ * moving to file-transfer is a later, separate change.
  */
 export async function downloadApk(
   apkUrl: string,
   onProgress?: (percent: number) => void,
 ): Promise<void> {
-  const res = await fetch(apkUrl);
-  if (!res.ok)
-    throw Error(`Update download failed (${res.status}).`);
-  const total = Number(res.headers.get("content-length") || 0);
-  const reader = res.body?.getReader();
-  if (!reader) {
-    const buf = await res.arrayBuffer();
-    return writeApkBytes(buf);
-  }
-  const chunks: Uint8Array[] = [];
-  let received = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) {
-      chunks.push(value);
-      received += value.length;
-      onProgress?.(total > 0 ? Math.round((received / total) * 100) : -1);
+  if (isNative()) {
+    const { Filesystem, Directory } = await import("@capacitor/filesystem");
+    let progressHandle: { remove: () => Promise<void> } | undefined;
+    try {
+      progressHandle = await Filesystem.addListener("progress", (status) => {
+        const total = Number(status?.contentLength ?? 0);
+        onProgress?.(
+          total > 0
+            ? Math.round((Number(status?.bytes ?? 0) / total) * 100)
+            : -1,
+        );
+      });
+    } catch {
+      // Progress is best-effort; the download still runs without it.
     }
-  }
-  const merged = new Uint8Array(received);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.length;
-  }
-  await writeApkBytes(merged.buffer);
-}
-
-async function writeApkBytes(buf: ArrayBuffer): Promise<void> {
-  if (!native) {
-    // Web build: plain browser download — there is no installer
-    // to hand the file to here.
-    const blob = new Blob([buf], {
-      type: "application/vnd.android.package-archive",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = UPDATE_APK_FILENAME;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    try {
+      await Filesystem.downloadFile({
+        url: apkUrl,
+        path: UPDATE_APK_FILENAME,
+        directory: Directory.Cache,
+        progress: true,
+      });
+    } finally {
+      try {
+        await progressHandle?.remove();
+      } catch {
+        // Listener already gone — nothing to clean up.
+      }
+    }
     return;
   }
-  const { Filesystem, Directory } = await import("@capacitor/filesystem");
-  await Filesystem.writeFile({
-    path: UPDATE_APK_FILENAME,
-    data: arrayBufferToBase64(buf),
-    directory: Directory.Cache,
-  });
+  // Web build: plain browser download of the APK URL itself.
+  const a = document.createElement("a");
+  a.href = apkUrl;
+  a.download = UPDATE_APK_FILENAME;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }

@@ -4,7 +4,7 @@ import {
   makeProfile,
   type Workspace,
 } from "../functions/src/core/model";
-import { memoryCloudStore, type CloudStore } from "../src/lib/cloudBackup";
+import { memoryKvStore, type KvStore } from "../src/lib/kvStore";
 import {
   loadBackupHistory,
   loadBackupPreferences,
@@ -69,7 +69,6 @@ function fakeNative(
       lastFilename: "",
       lastShopName: "",
       lastCountsJson: "",
-      driveOk: false,
       lastError: "",
     }),
     runNow: async () => ({ started: true }),
@@ -78,7 +77,7 @@ function fakeNative(
   };
 }
 
-function enableAutoBackup(store: CloudStore) {
+function enableAutoBackup(store: KvStore) {
   saveBackupPreferences(
     { ...loadBackupPreferences(store), autoBackup: true },
     store,
@@ -91,32 +90,30 @@ beforeEach(() => {
 
 describe("prepareAutoBackup", () => {
   it("returns disabled when the toggle is off", async () => {
-    const store = memoryCloudStore().store;
+    const store = memoryKvStore().store;
     const result = await prepareAutoBackup(
       data(),
       fakeNative(),
       store,
-      memoryCloudStore().store,
       async () => {},
     );
     expect(result).toEqual({ prepared: false, reason: "disabled" });
   });
 
   it("returns unsupported for the real plugin off Android", async () => {
-    const store = memoryCloudStore().store;
+    const store = memoryKvStore().store;
     enableAutoBackup(store);
     const result = await prepareAutoBackup(
       data(),
       undefined,
       store,
-      memoryCloudStore().store,
       async () => {},
     );
     expect(result).toEqual({ prepared: false, reason: "unsupported" });
   });
 
   it("writes a valid backup snapshot when enabled, and skips the rewrite when unchanged", async () => {
-    const store = memoryCloudStore().store;
+    const store = memoryKvStore().store;
     enableAutoBackup(store);
     const written: [string, string][] = [];
     const writer = async (path: string, json: string) => {
@@ -126,7 +123,6 @@ describe("prepareAutoBackup", () => {
       data(),
       fakeNative(),
       store,
-      memoryCloudStore().store,
       writer,
     );
     expect(first.prepared).toBe(true);
@@ -142,7 +138,6 @@ describe("prepareAutoBackup", () => {
       data(),
       fakeNative(),
       store,
-      memoryCloudStore().store,
       writer,
     );
     expect(second.prepared).toBe(true);
@@ -157,7 +152,6 @@ describe("prepareAutoBackup", () => {
       changed,
       fakeNative(),
       store,
-      memoryCloudStore().store,
       writer,
     );
     expect(third.prepared).toBe(true);
@@ -167,7 +161,7 @@ describe("prepareAutoBackup", () => {
   });
 
   it("syncs a successful native run into localStorage, once", async () => {
-    const store = memoryCloudStore().store;
+    const store = memoryKvStore().store;
     enableAutoBackup(store);
     const native = fakeNative({
       getStatus: async () => ({
@@ -180,7 +174,6 @@ describe("prepareAutoBackup", () => {
         lastShopName: "Test shop",
         lastCountsJson:
           '{"products":1,"customers":0,"rates":0,"invoices":0,"drafts":0,"loans":0}',
-        driveOk: true,
         lastError: "",
       }),
     });
@@ -188,7 +181,6 @@ describe("prepareAutoBackup", () => {
       data(),
       native,
       store,
-      memoryCloudStore().store,
       async () => {},
     );
     expect(first.prepared).toBe(true);
@@ -206,7 +198,6 @@ describe("prepareAutoBackup", () => {
       data(),
       native,
       store,
-      memoryCloudStore().store,
       async () => {},
     );
     expect(second.prepared).toBe(true);
@@ -216,7 +207,7 @@ describe("prepareAutoBackup", () => {
   });
 
   it("does not sync a failed or skipped run", async () => {
-    const store = memoryCloudStore().store;
+    const store = memoryKvStore().store;
     enableAutoBackup(store);
     for (const lastStatus of ["failed", "no-snapshot"]) {
       const native = fakeNative({
@@ -229,7 +220,6 @@ describe("prepareAutoBackup", () => {
           lastFilename: "",
           lastShopName: "",
           lastCountsJson: "",
-          driveOk: false,
           lastError: "write-failed",
         }),
       });
@@ -237,7 +227,6 @@ describe("prepareAutoBackup", () => {
         data(),
         native,
         store,
-        memoryCloudStore().store,
         async () => {},
       );
       expect(result.prepared).toBe(true);
@@ -248,7 +237,7 @@ describe("prepareAutoBackup", () => {
   });
 
   it("re-arms the native schedule when native lost it", async () => {
-    const store = memoryCloudStore().store;
+    const store = memoryKvStore().store;
     enableAutoBackup(store);
     let scheduled = 0;
     const native = fakeNative({
@@ -261,7 +250,6 @@ describe("prepareAutoBackup", () => {
         lastFilename: "",
         lastShopName: "",
         lastCountsJson: "",
-        driveOk: false,
         lastError: "",
       }),
       scheduleBackup: async () => {
@@ -273,7 +261,6 @@ describe("prepareAutoBackup", () => {
       data(),
       native,
       store,
-      memoryCloudStore().store,
       async () => {},
     );
     expect(result.prepared).toBe(true);
@@ -294,22 +281,11 @@ describe("syncAutoBackupRun", () => {
     lastFilename: "aurum-backup-test-shop-2026.json",
     lastShopName: "Test shop",
     lastCountsJson: "",
-    driveOk: true,
     lastError: "",
   };
 
-  it("counts a partial run (local file exists, Drive failed) as a backup", () => {
-    const store = memoryCloudStore().store;
-    const ok = syncAutoBackupRun(
-      { ...base, lastStatus: "partial", driveOk: false, lastError: "write-failed" },
-      store,
-    );
-    expect(ok).toBe(true);
-    expect(loadLastBackupAt(store)).toBe("2026-11-24T02:00:00.000Z");
-  });
-
   it("ignores a failed run and an older run", () => {
-    const store = memoryCloudStore().store;
+    const store = memoryKvStore().store;
     expect(
       syncAutoBackupRun({ ...base, lastStatus: "failed" }, store),
     ).toBe(false);
@@ -338,7 +314,7 @@ describe("schedule / cancel / runNow", () => {
         return { started: true };
       },
     });
-    const scheduled = await scheduleAutoBackup(native, memoryCloudStore().store);
+    const scheduled = await scheduleAutoBackup(native);
     expect(scheduled).toEqual({
       scheduled: true,
       mode: "exact",
@@ -346,7 +322,7 @@ describe("schedule / cancel / runNow", () => {
     });
     await cancelAutoBackup(native);
     expect(cancelled).toBe(1);
-    expect(await runAutoBackupNow(native, memoryCloudStore().store)).toBe(true);
+    expect(await runAutoBackupNow(native)).toBe(true);
     expect(started).toBe(1);
     const status = await loadAutoBackupStatus(native);
     expect(status?.enabled).toBe(true);
@@ -356,10 +332,10 @@ describe("schedule / cancel / runNow", () => {
 
 describe("autoBackupFailureText", () => {
   it("explains the native reason codes", () => {
-    expect(autoBackupFailureText("not-connected")).toContain("Drive folder");
-    expect(autoBackupFailureText("permission-revoked")).toContain(
-      "Drive permission",
+    expect(autoBackupFailureText("write-failed")).toContain(
+      "Automatic backup failed",
     );
+    expect(autoBackupFailureText("unknown-code")).toBe("unknown-code");
     expect(autoBackupFailureText("no-snapshot")).toContain("open the app");
     expect(autoBackupFailureText("local-write-failed")).toContain(
       "AurumBackup folder",
