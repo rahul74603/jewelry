@@ -37,9 +37,12 @@ const APP_VERSION = import.meta.env.VITE_APP_VERSION || "dev";
  * The shop screens inside Master run UNLOCKED — no customer
  * activation gate (main.tsx already skips the gate for master
  * mode, and there is no license heartbeat/block here). The
- * Master app's own update check (mode=master) runs once per open,
- * at most once a day, fail-open like the customer app; every
- * update is optional, the banner always offers [Baad me].
+ * Master app's own update check (mode=master) runs on every
+ * open, fail-open like the customer app (v1.0.54: no once-a-day
+ * cache); every update is optional, the banner always offers
+ * [Baad me]. No license heartbeat here and no system
+ * notification — the Master app is Ajay's own tool, not a shop
+ * phone.
  */
 export default function Master() {
   const [data, setData] = useState(loadDemoWorkspace);

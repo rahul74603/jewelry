@@ -4,12 +4,9 @@ import {
   compareVersions,
   checkLatest,
   maybeCheckLatest,
-  shouldCheckUpdate,
-  markUpdateChecked,
   wireDeviceId,
   downloadApk,
   UPDATE_APK_FILENAME,
-  UPDATE_CHECK_KEY,
 } from "../src/lib/appUpdate";
 
 // The native download path goes through the Capacitor Filesystem
@@ -45,25 +42,6 @@ const LATEST = {
   allowed: true,
   mandatory: false,
 };
-
-// vitest runs in node by default: provide a minimal localStorage.
-function installStorage() {
-  const store = new Map<string, string>();
-  Object.defineProperty(globalThis, "localStorage", {
-    value: {
-      getItem: (k: string) => store.get(k) ?? null,
-      setItem: (k: string, v: string) => {
-        store.set(k, v);
-      },
-      removeItem: (k: string) => {
-        store.delete(k);
-      },
-      clear: () => store.clear(),
-    },
-    configurable: true,
-  });
-  return store;
-}
 
 describe("compareVersions", () => {
   it("1.0.45 is newer than 1.0.44", () => {
@@ -159,11 +137,11 @@ describe("checkLatest (per-device contract)", () => {
     });
   });
 
-  it("allowed:false means no update, even for a newer version", async () => {
+  it("allowed:false means no update, even for a newer version — and the answer is definitive (checked)", async () => {
     fetchFn.mockResolvedValueOnce(jsonResponse({ ...LATEST, allowed: false }));
     await expect(
       checkLatest(BASE, DEVICE_ID, "1.0.44", "demo", "arm64-v8a"),
-    ).resolves.toEqual({ available: false });
+    ).resolves.toEqual({ available: false, checked: true });
   });
 
   it("a missing allowed flag means NOT allowed (default false)", async () => {
@@ -172,14 +150,14 @@ describe("checkLatest (per-device contract)", () => {
     );
     await expect(
       checkLatest(BASE, DEVICE_ID, "1.0.44", "demo", "arm64-v8a"),
-    ).resolves.toEqual({ available: false });
+    ).resolves.toEqual({ available: false, checked: true });
   });
 
   it("{allowed:false} with no version at all means no update", async () => {
     fetchFn.mockResolvedValueOnce(jsonResponse({ allowed: false }));
     await expect(
       checkLatest(BASE, DEVICE_ID, "1.0.44", "demo", "arm64-v8a"),
-    ).resolves.toEqual({ available: false });
+    ).resolves.toEqual({ available: false, checked: true });
   });
 
   it("fail-open: version null, or equal/older than installed", async () => {
@@ -188,13 +166,13 @@ describe("checkLatest (per-device contract)", () => {
     );
     await expect(
       checkLatest(BASE, DEVICE_ID, "1.0.44", "demo", "arm64-v8a"),
-    ).resolves.toEqual({ available: false });
+    ).resolves.toEqual({ available: false, checked: true });
     expect(
       await checkLatest(BASE, DEVICE_ID, "1.0.45", "demo", "arm64-v8a"),
-    ).toEqual({ available: false });
+    ).toEqual({ available: false, checked: true });
     expect(
       await checkLatest(BASE, DEVICE_ID, "1.0.46", "demo", "arm64-v8a"),
-    ).toEqual({ available: false });
+    ).toEqual({ available: false, checked: true });
   });
 
   it("fail-open: allowed but no APK URL", async () => {
@@ -203,7 +181,7 @@ describe("checkLatest (per-device contract)", () => {
     );
     await expect(
       checkLatest(BASE, DEVICE_ID, "1.0.44", "demo", "arm64-v8a"),
-    ).resolves.toEqual({ available: false });
+    ).resolves.toEqual({ available: false, checked: true });
   });
 
   it("fail-open: invalid deviceId never touches the network", async () => {
@@ -238,11 +216,10 @@ describe("checkLatest (per-device contract)", () => {
   });
 });
 
-describe("once-a-day update check cache", () => {
+describe("update check runs on every open (v1.0.54 — no once-a-day cache)", () => {
   let fetchFn: ReturnType<typeof vi.fn>;
   beforeEach(() => {
     vi.stubEnv("VITE_LICENSE_SERVER_URL", BASE);
-    installStorage();
     fetchFn = vi.fn(async () => jsonResponse(LATEST));
     vi.stubGlobal("fetch", fetchFn);
   });
@@ -251,7 +228,7 @@ describe("once-a-day update check cache", () => {
     vi.unstubAllGlobals();
   });
 
-  it("second check the same day is skipped (no second fetch)", async () => {
+  it("a second check right after the first still hits the server — never skipped", async () => {
     const first = await maybeCheckLatest({
       deviceId: DEVICE_ID,
       currentVersion: "1.0.44",
@@ -261,41 +238,19 @@ describe("once-a-day update check cache", () => {
     expect(first.available).toBe(true);
     expect(fetchFn).toHaveBeenCalledTimes(1);
 
+    // The banner was dismissed with [Baad me] and the app re-opened:
+    // the check runs again and the banner comes straight back.
     const second = await maybeCheckLatest({
       deviceId: DEVICE_ID,
       currentVersion: "1.0.44",
       mode: "demo",
       abi: "arm64-v8a",
     });
-    expect(second).toEqual({ available: false, skipped: true });
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-  });
-
-  it("next day the check runs again", async () => {
-    await maybeCheckLatest({
-      deviceId: DEVICE_ID,
-      currentVersion: "1.0.44",
-      mode: "demo",
-      abi: "arm64-v8a",
-    });
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-    // Pretend a day has passed since the last check.
-    localStorage.setItem(
-      UPDATE_CHECK_KEY,
-      String(Date.now() - 25 * 60 * 60 * 1000),
-    );
-    expect(shouldCheckUpdate()).toBe(true);
-    const next = await maybeCheckLatest({
-      deviceId: DEVICE_ID,
-      currentVersion: "1.0.44",
-      mode: "demo",
-      abi: "arm64-v8a",
-    });
-    expect(next.available).toBe(true);
+    expect(second.available).toBe(true);
     expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 
-  it("a failed check still marks the day, so a down server is not retried on every open", async () => {
+  it("a failed check does not block the next check — a down server is retried on the next open", async () => {
     fetchFn.mockRejectedValueOnce(Error("network down"));
     const r = await maybeCheckLatest({
       deviceId: DEVICE_ID,
@@ -304,25 +259,26 @@ describe("once-a-day update check cache", () => {
       abi: "arm64-v8a",
     });
     expect(r).toEqual({ available: false });
-    expect(shouldCheckUpdate()).toBe(false);
-    expect(localStorage.getItem(UPDATE_CHECK_KEY)).toBeTruthy();
-    // And the next call the same day is skipped, not retried.
+    expect(r).not.toHaveProperty("checked");
     const again = await maybeCheckLatest({
       deviceId: DEVICE_ID,
       currentVersion: "1.0.44",
       mode: "demo",
       abi: "arm64-v8a",
     });
-    expect(again).toEqual({ available: false, skipped: true });
-    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(again.available).toBe(true);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 
-  it("markUpdateChecked / shouldCheckUpdate round-trip", () => {
-    expect(shouldCheckUpdate()).toBe(true);
-    markUpdateChecked();
-    expect(shouldCheckUpdate()).toBe(false);
-    markUpdateChecked(Date.now() - 25 * 60 * 60 * 1000);
-    expect(shouldCheckUpdate()).toBe(true);
+  it("a definitive no-update answer carries checked:true so the caller may clear the notice", async () => {
+    const r = await maybeCheckLatest({
+      deviceId: DEVICE_ID,
+      currentVersion: "1.0.45",
+      mode: "demo",
+      abi: "arm64-v8a",
+    });
+    expect(r).toEqual({ available: false, checked: true });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 });
 

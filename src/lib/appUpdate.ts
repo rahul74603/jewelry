@@ -34,10 +34,16 @@ import {
  * Fail-open everywhere: an unconfigured server, no network, a
  * timeout, a bad response, allowed=false, or an equal/older
  * version all mean "no update" and the app works exactly as
- * before, fully offline. The check runs at most once a day (not
- * every 5 minutes like the license heartbeat) — an update is not
- * urgent enough to hammer the server, and a shopkeeper opens the
- * app many times a day.
+ * before, fully offline.
+ *
+ * v1.0.54 (Ajay, 2026-11-27): NO once-a-day cache any more. The
+ * check runs on EVERY app open and on the license heartbeat's
+ * 5-minute tick while the app stays open — the update notice
+ * must appear as soon as the app registers and stay until the
+ * app is on the latest version. The old "check at most once a
+ * day" rule is what hid the notice after a reinstall, so it is
+ * gone: a failed check still fails open (no banner, no crash),
+ * but a successful check is never skipped.
  *
  * The FIRST release-signed build (1.0.45) still needs ONE
  * uninstall per phone: today's installs use a disposable debug
@@ -45,9 +51,6 @@ import {
  * own release key signs every build and this updater takes over.
  */
 
-export const UPDATE_CHECK_KEY = "aurum:update-last-check-v1";
-/** One day between update checks. */
-export const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 export const UPDATE_APK_FILENAME = "aurum-update.apk";
 
 /** Numeric per segment; "1.0.45" > "1.0.44"; equal → 0. Malformed
@@ -111,7 +114,7 @@ export type UpdateAvailable = {
 };
 
 export type UpdateCheckResult =
-  | { available: false; skipped?: boolean }
+  | { available: false; skipped?: boolean; checked?: boolean }
   | UpdateAvailable;
 
 /**
@@ -123,7 +126,12 @@ export type UpdateCheckResult =
  * Returns {available:true, mandatory, apkUrl} ONLY when allowed
  * is true AND version > currentVersion. If allowed is false, or
  * version is null/missing, or version <= current, or there is no
- * APK URL → {available:false}.
+ * APK URL → {available:false, checked:true}: the server answered,
+ * so the caller knows the phone is DEFINITELY on the latest
+ * version (or has no update offered) and may clear any standing
+ * update notice. A network error, timeout, non-2xx or bad JSON →
+ * {available:false} with NO `checked` flag: the check failed, so
+ * the caller must leave any standing notice alone (fail-open).
  *
  * NOTE: `mandatory` is passed through from the server (default
  * 0) but the UI deliberately ignores it — every pushed update is
@@ -179,16 +187,17 @@ export async function checkLatest(
     // Ajay's rollout control: no update until he pushes the
     // staged version to all shops ("Sabko update bhejo"). Default
     // allowed=false for every new version — a missing flag means
-    // NOT allowed.
-    if (latest.allowed !== true) return { available: false };
+    // NOT allowed. The server answered, so `checked` is set: the
+    // caller may clear a standing update notice.
+    if (latest.allowed !== true) return { available: false, checked: true };
     const version =
       typeof latest.version === "string" ? latest.version.trim() : "";
-    if (!version) return { available: false };
+    if (!version) return { available: false, checked: true };
     if (compareVersions(version, currentVersion) <= 0)
-      return { available: false };
+      return { available: false, checked: true };
     const apkUrl =
       typeof latest.apkUrl === "string" ? latest.apkUrl.trim() : "";
-    if (!apkUrl) return { available: false };
+    if (!apkUrl) return { available: false, checked: true };
     return {
       available: true,
       version,
@@ -201,26 +210,6 @@ export async function checkLatest(
   }
 }
 
-function storage(): Storage | null {
-  try {
-    return typeof localStorage !== "undefined" ? localStorage : null;
-  } catch {
-    return null;
-  }
-}
-
-/** True when a day has passed since the last update check. */
-export function shouldCheckUpdate(now = Date.now()): boolean {
-  const at = Number(storage()?.getItem(UPDATE_CHECK_KEY) ?? 0);
-  return (
-    !Number.isFinite(at) || at <= 0 || now - at >= UPDATE_CHECK_INTERVAL_MS
-  );
-}
-
-export function markUpdateChecked(now = Date.now()): void {
-  storage()?.setItem(UPDATE_CHECK_KEY, String(now));
-}
-
 export type MaybeCheckLatestArgs = {
   deviceId: string;
   currentVersion: string;
@@ -229,27 +218,24 @@ export type MaybeCheckLatestArgs = {
 };
 
 /**
- * The once-a-day check: skips the network call when a check
- * already ran in the last 24 hours (the timestamp is marked on
- * every attempt, success or fail, so a down server is not
- * retried on every app open). Returns {available:false,
- * skipped:true} when skipped — the caller shows nothing.
+ * The update check (v1.0.54): EVERY call hits the server — there
+ * is no once-a-day cache any more. Ajay's rule: the notice must
+ * appear as soon as the app registers and stay until the app is
+ * on the latest version, so a check is never skipped. Callers run
+ * this on every app open and on the license heartbeat's 5-minute
+ * tick. A failed check fails open ({available:false}, no `checked`
+ * flag) and never throws.
  */
 export async function maybeCheckLatest(
   args: MaybeCheckLatestArgs,
 ): Promise<UpdateCheckResult> {
-  if (!shouldCheckUpdate()) return { available: false, skipped: true };
-  try {
-    return await checkLatest(
-      getLicenseServerUrl(),
-      args.deviceId,
-      args.currentVersion,
-      args.mode,
-      args.abi,
-    );
-  } finally {
-    markUpdateChecked();
-  }
+  return checkLatest(
+    getLicenseServerUrl(),
+    args.deviceId,
+    args.currentVersion,
+    args.mode,
+    args.abi,
+  );
 }
 
 // ---------------------------------------------------------------------------

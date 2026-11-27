@@ -14,10 +14,20 @@ import {
  *
  * A small in-flow banner at the top of the app (reuses
  * .bill-alert, never covers the screen, dismissible with
- * [Baad me] until tomorrow's check). EVERY update is a normal
+ * [Baad me] for THIS SESSION ONLY — the check runs on every open
+ * and on the 5-minute tick, so the banner comes straight back
+ * until the app is updated, v1.0.54). EVERY update is a normal
  * optional update — there is no mandatory blocking screen: even
  * if the server sends mandatory=true, the banner still shows
  * [Baad me] (Ajay's staged rollout: pushed updates are optional).
+ *
+ * v1.0.54 also adds the notification ask: while an update is
+ * pending and the Android notification permission has not been
+ * asked yet, the banner shows a one-line Hindi explanation +
+ * [Notification on karo] — tapping it requests the permission,
+ * and the persistent "Aurum update aaya hai" notice then stays
+ * in the notification shade until the app is updated. If the
+ * shopkeeper denies, this banner is still the fallback.
  *
  * The flow: [Update karo] downloads the APK with progress, then —
  * on Android — checks "Install unknown apps": if not allowed yet,
@@ -39,10 +49,16 @@ type Stage =
 function UpdateFlow({
   info,
   onDismiss,
+  showNotifyAsk,
+  onEnableNotifications,
 }: {
   info: UpdateAvailable;
   /** Shown only for optional updates. */
   onDismiss?: () => void;
+  /** True while an update is pending and the notification permission has not been asked yet. */
+  showNotifyAsk?: boolean;
+  /** Requests the Android notification permission (called from the in-app explanation button). */
+  onEnableNotifications?: () => void;
 }) {
   const [stage, setStage] = useState<Stage>("offer");
   const [progress, setProgress] = useState(-1);
@@ -92,10 +108,21 @@ function UpdateFlow({
             bill, stock, customer aur activation — bilkul safe rahega,
             kuch delete nahi hoga.
           </p>
+          {showNotifyAsk && onEnableNotifications && (
+            <p>
+              Update ki khabar notification bar me bhi aaye, iske liye
+              permission do — phir update aate hi notification aayega.
+            </p>
+          )}
           <div className="bill-alert-actions">
             <button className="btn primary" onClick={() => void startDownload()}>
               <Download size={15} /> Update karo
             </button>
+            {showNotifyAsk && onEnableNotifications && (
+              <button className="btn outline" onClick={onEnableNotifications}>
+                Notification on karo
+              </button>
+            )}
             {onDismiss && (
               <button className="btn outline" onClick={onDismiss}>
                 Baad me
@@ -199,13 +226,22 @@ function UpdateFlow({
 export function UpdateBanner({
   info,
   onDismiss,
+  showNotifyAsk,
+  onEnableNotifications,
 }: {
   info: UpdateAvailable;
   onDismiss: () => void;
+  showNotifyAsk?: boolean;
+  onEnableNotifications?: () => void;
 }) {
   return (
     <div className="bill-alert" role="status" style={{ margin: "12px 12px 0" }}>
-      <UpdateFlow info={info} onDismiss={onDismiss} />
+      <UpdateFlow
+        info={info}
+        onDismiss={onDismiss}
+        showNotifyAsk={showNotifyAsk}
+        onEnableNotifications={onEnableNotifications}
+      />
     </div>
   );
 }
