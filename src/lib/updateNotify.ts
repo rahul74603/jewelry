@@ -128,7 +128,7 @@ async function postNotification(
       notifications: [
         {
           id: UPDATE_NOTIFICATION_ID,
-          title: "Aurum update aaya hai — Update karo",
+          title: `Aurum ${version} aaya hai — Update karo`,
           body: `Naya version ${version} aaya hai. App kholo aur Update karo — aapka data safe rahega.`,
           // Ongoing: the shopkeeper cannot swipe it away — it stays
           // in the shade until the app is on the latest version and

@@ -76,7 +76,7 @@ describe("updateNotify (v1.0.54 — persistent notification-bar notice)", () => 
     ];
     const n = opts.notifications[0];
     expect(n.id).toBe(UPDATE_NOTIFICATION_ID);
-    expect(n.title).toBe("Aurum update aaya hai — Update karo");
+    expect(n.title).toBe("Aurum 1.0.54 aaya hai — Update karo");
     expect(String(n.body)).toContain("1.0.54");
     expect(n.ongoing).toBe(true);
     expect(n.autoCancel).toBe(false);
