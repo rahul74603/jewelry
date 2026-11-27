@@ -37,6 +37,8 @@ import {
 import { Avatar, Empty, Ingots, Select, Status, Icon } from "../components/ui";
 import { prepareAutoSms } from "../lib/autoSms";
 import { prepareAutoBackup } from "../lib/autoBackup";
+import { getDeviceId } from "../lib/offlineActivation";
+import { markServerBackupPending, syncServerBackupOnOpen } from "../lib/serverBackup";
 import type { Invoice, Workspace } from "../../functions/src/core/model";
 export function SalesChart({ data }: { data: Workspace }) {
   const [length, N] = useState(7),
@@ -286,7 +288,21 @@ export default function Dashboard() {
   // snapshot the JS side wrote, so it must stay fresh.
   useEffect(() => {
     void prepareAutoSms(data);
-    void prepareAutoBackup(data);
+    // server cloud backup: the 02:00 run itself is native (the app may be
+    // closed at 2 AM), so the cloud upload happens on the next app open
+    // after the native run is synced — plus syncServerBackupOnOpen retries
+    // once a day on later opens. Best-effort, never throws, never
+    // blocks render; no UI here, silent.
+    void (async () => {
+      try {
+        const prep = await prepareAutoBackup(data);
+        if (prep.prepared && prep.synced) markServerBackupPending();
+        const id = await getDeviceId().catch(() => "");
+        if (id) await syncServerBackupOnOpen(data, id);
+      } catch {
+        // Silent: cloud backup must never break the app open flow.
+      }
+    })();
   }, [data]);
   const rows = series(data, period),
     sales = rows.reduce((s, r) => s + r.sales, 0),

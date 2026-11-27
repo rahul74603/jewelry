@@ -86,6 +86,7 @@ import {
   scheduleAutoBackup,
   type AutoBackupStatus,
 } from "../lib/autoBackup";
+import { fetchLatestServerBackup, getServerBackupStatus } from "../lib/serverBackup";
 import {
   accountDocuments,
   allocations,
@@ -386,6 +387,9 @@ function BackupRestoreSection() {
     [cloudReason, setCloudReason] = useState<string | null>(
       () => getCloudStatus().reason,
     ),
+    // server cloud backup status (no Drive, no folder pick) — refreshed
+    // when this section opens, alongside the Drive status below.
+    [serverBackupStatus, setServerBackupStatus] = useState(() => getServerBackupStatus()),
     [autoStatus, setAutoStatus] = useState<AutoBackupStatus | null>(null),
     [autoBusy, setAutoBusy] = useState(false);
   const autoSupported = isAutoBackupSupported();
@@ -396,6 +400,7 @@ function BackupRestoreSection() {
   // On opening Settings, show the last 02:00 run (if any).
   useEffect(() => {
     void refreshAutoStatus();
+    setServerBackupStatus(getServerBackupStatus());
   }, []);
   /**
    * Automatic 02:00 AM backup toggle (default OFF). Turning it ON
@@ -418,8 +423,8 @@ function BackupRestoreSection() {
         notify(
           scheduled
             ? scheduled.mode === "exact"
-              ? "Automatic backup ON — roz raat 2 baje backup hoga (phone + Drive)."
-              : "Automatic backup ON — roz raat 2 baje ke aas-paas backup hoga (exact alarm ki permission nahi hai)."
+              ? "Automatic backup ON — roz raat 2 baje backup hoga (phone + cloud)."
+              : "Automatic backup ON — roz raat 2 baje ke aas-paas backup hoga (phone + cloud; exact alarm ki permission nahi hai)."
             : "Automatic backup ON — agali baar app khulne par schedule hoga.",
         );
       } else {
@@ -584,6 +589,46 @@ function BackupRestoreSection() {
         return;
       }
       setPreview(result.file);
+    } catch (e) {
+      setError(err(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  /**
+   * Restore from the server cloud backup (no Drive, no folder pick).
+   * Fetches this phone's latest cloud backup, validates it with the
+   * same parseBackup() as every other restore path, then hands it to
+   * the existing preview / confirm UI and doRestore() — no restore
+   * logic is duplicated here.
+   */
+  const restoreFromServerBackup = async () => {
+    setBusy(true);
+    setError("");
+    setPreview(null);
+    try {
+      const id = await getDeviceId();
+      const got = await fetchLatestServerBackup(id);
+      if (!got.found) {
+        if (got.reason === "not-found")
+          setError("Cloud par koi backup nahi mila");
+        else if (got.reason === "blocked")
+          setError(
+            "Is phone ka cloud backup blocked hai — Ajay se baat karen",
+          );
+        else
+          setError(
+            "Cloud backup abhi nahi mila — internet check karke dobara try karen",
+          );
+        return;
+      }
+      const result = await parseBackup(got.text);
+      if (!result.valid) {
+        setError(result.errors.join(" "));
+        return;
+      }
+      setPreview(result.file);
+      setConfirmRestore(true);
     } catch (e) {
       setError(err(e));
     } finally {
@@ -824,6 +869,16 @@ function BackupRestoreSection() {
           </>
         )}
       </p>
+      {serverBackupStatus.status !== "never" && (
+        <p className="muted">
+          Cloud backup:{" "}
+          {serverBackupStatus.status === "ok"
+            ? serverBackupStatus.lastUploadAt
+              ? `last cloud upload ${day(new Date(serverBackupStatus.lastUploadAt).getTime())}`
+              : "uploaded"
+            : "Cloud backup pending — agle app open par dobara try hoga"}
+        </p>
+      )}
       <div className="settings-actions">
         <span>
           {cloudFolder
@@ -895,6 +950,14 @@ function BackupRestoreSection() {
           Restore from Google Drive
         </button>
       )}
+      <button
+        className="btn outline"
+        disabled={busy}
+        onClick={() => void restoreFromServerBackup()}
+      >
+        <CloudDownload size={15} />
+        Cloud backup se restore
+      </button>
       {preview && (
         <div className="info-box">
           <ShieldCheck size={20} />

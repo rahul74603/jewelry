@@ -259,9 +259,12 @@ export function recordBackupHistory(
 export type PrefsStore = {
   get(key: string): string | null;
   set(key: string, value: string): void;
+  /** Optional: truly forget a key. Stores without it fall back to
+   * writing an empty value, which readers treat as absent. */
+  remove?(key: string): void;
 };
 
-const localPrefsStore: PrefsStore = {
+export const localPrefsStore: PrefsStore = {
   get: (key) => {
     try {
       return typeof localStorage === "undefined"
@@ -278,6 +281,14 @@ const localPrefsStore: PrefsStore = {
     } catch {
       // Storage full / unavailable: backup still works via
       // download/share; only the reminder history is lost.
+    }
+  },
+  remove: (key) => {
+    try {
+      if (typeof localStorage !== "undefined")
+        localStorage.removeItem(key);
+    } catch {
+      // Nothing to clear.
     }
   },
 };

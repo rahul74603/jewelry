@@ -9,6 +9,7 @@ import {
   type OfflineDeviceRow,
 } from "../lib/licenseAdmin";
 import { isLicenseAdminConfigured } from "../lib/licenseServer";
+import { transferServerBackup } from "../lib/serverBackup";
 import { err } from "../lib/format";
 import { Modal, Problem } from "./ui";
 
@@ -117,7 +118,14 @@ export default function LicensesDashboard({
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [note, setNote] = useState("");
   const [busyId, setBusyId] = useState("");
+  // Backup transfer: the old Device ID typed per row (new phone
+  // after a reset / replacement — its cloud backup still lives
+  // under the old Device ID).
+  const [transferFrom, setTransferFrom] = useState<Record<string, string>>(
+    {},
+  );
   // Issued-keys detail: the tapped row, with its unlock key hidden
   // behind "Key dikhao" until Ajay taps to reveal it.
   const [selected, setSelected] = useState<LocalRegisterRow | null>(null);
@@ -200,6 +208,39 @@ export default function LicensesDashboard({
     }
   };
 
+  /**
+   * Backup transfer (Master only): copy this phone's cloud backup
+   * from the OLD Device ID typed in the row, so a shopkeeper whose
+   * phone was reset / replaced can restore on the new phone. Same
+   * window.confirm pattern as Block/Unblock/Remove above; success
+   * is an inline note like the error line, failure goes to it.
+   */
+  const transferBackup = async (d: OfflineDeviceRow) => {
+    const oldId = (transferFrom[d.deviceId] ?? "").trim();
+    if (!oldId) return;
+    if (
+      !window.confirm(
+        `Is phone ka backup purane Device ID ${oldId} se is phone par copy karen?`,
+      )
+    )
+      return;
+    setBusyId(d.deviceId);
+    setError("");
+    setNote("");
+    try {
+      const res = await transferServerBackup(oldId, d.deviceId);
+      const count = res.copied.length;
+      setNote(
+        `Backup transfer ho gaya — ${count} file${count === 1 ? "" : "s"} copy hui. Is phone par ab "Cloud backup se restore" se restore karen.`,
+      );
+      setTransferFrom((m) => ({ ...m, [d.deviceId]: "" }));
+    } catch (e) {
+      setError(err(e));
+    } finally {
+      setBusyId("");
+    }
+  };
+
   return (
     <>
       <section className="auth-card">
@@ -228,6 +269,7 @@ export default function LicensesDashboard({
               <RefreshCw size={14} /> {loading ? "Loading…" : "Refresh"}
             </button>
             <Problem message={error} />
+            {note && <p className="muted">{note}</p>}
             <p className="muted">
               Remove is for phones that were uninstalled — it only
               clears the entry here. A phone that still has the app
@@ -290,6 +332,37 @@ export default function LicensesDashboard({
                         onClick={() => void remove(d)}
                       >
                         Remove
+                      </button>
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "8px",
+                        flexWrap: "wrap",
+                        marginTop: "8px",
+                      }}
+                    >
+                      <input
+                        value={transferFrom[d.deviceId] ?? ""}
+                        onChange={(e) =>
+                          setTransferFrom((m) => ({
+                            ...m,
+                            [d.deviceId]: e.target.value,
+                          }))
+                        }
+                        placeholder="Purana Device ID (XXXX-XXXX-XXXX)"
+                        aria-label="Purana Device ID"
+                        style={{ flex: "1 1 200px", minWidth: 0 }}
+                      />
+                      <button
+                        className="btn outline"
+                        disabled={
+                          busyId === d.deviceId ||
+                          !(transferFrom[d.deviceId] ?? "").trim()
+                        }
+                        onClick={() => void transferBackup(d)}
+                      >
+                        Transfer
                       </button>
                     </div>
                   </div>
